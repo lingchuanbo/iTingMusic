@@ -17,6 +17,7 @@ const showResults = ref(false)
 const searchResults = ref<SearchResult[]>([])
 const quality = ref<AudioQuality>('320k')
 const fileInput = ref<HTMLInputElement>()
+const showMobileSearch = ref(false)
 
 const qualities: { value: AudioQuality; label: string }[] = [
   { value: '128k', label: '标准' },
@@ -87,7 +88,8 @@ function getPlatformIcon(platform: string) {
 
 <template>
   <div class="relative p-4">
-    <div class="flex items-center gap-3">
+    <!-- 桌面端：完整搜索栏 -->
+    <div class="hidden md:flex items-center gap-3">
       <!-- 搜索框 -->
       <div class="flex-1 relative">
         <input
@@ -127,22 +129,33 @@ function getPlatformIcon(platform: string) {
       >
         📁
       </button>
-      
-      <input
-        ref="fileInput"
-        type="file"
-        accept="audio/*"
-        multiple
-        class="hidden"
-        @change="handleFileSelect"
-      />
     </div>
+
+    <!-- 移动端：搜索按钮 -->
+    <div class="flex md:hidden">
+      <button
+        @click="showMobileSearch = true"
+        class="flex-1 h-10 px-4 rounded-xl bg-white/10 text-white/50 flex items-center gap-2"
+      >
+        <span>🔍</span>
+        <span>搜索歌曲、歌手...</span>
+      </button>
+    </div>
+      
+    <input
+      ref="fileInput"
+      type="file"
+      accept="audio/*"
+      multiple
+      class="hidden"
+      @change="handleFileSelect"
+    />
     
-    <!-- 搜索结果下拉 -->
+    <!-- 桌面端搜索结果下拉 -->
     <Transition name="fade">
       <div 
         v-if="showResults && searchResults.length"
-        class="absolute left-4 right-4 top-full mt-2 max-h-80 overflow-y-auto rounded-xl bg-black/80 backdrop-blur-xl border border-white/10 z-50"
+        class="hidden md:block absolute left-4 right-4 top-full mt-2 max-h-80 overflow-y-auto rounded-xl bg-black/80 backdrop-blur-xl border border-white/10 z-50"
       >
         <div class="p-2">
           <div
@@ -174,12 +187,98 @@ function getPlatformIcon(platform: string) {
       </div>
     </Transition>
     
-    <!-- 点击外部关闭 -->
+    <!-- 点击外部关闭（桌面端） -->
     <div 
       v-if="showResults"
-      class="fixed inset-0 z-40"
+      class="hidden md:block fixed inset-0 z-40"
       @click="showResults = false"
     ></div>
+
+    <!-- 移动端搜索浮窗 -->
+    <Transition name="modal">
+      <div 
+        v-if="showMobileSearch"
+        class="md:hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col"
+      >
+        <!-- 顶部搜索栏 -->
+        <div class="p-4 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <button
+              @click="showMobileSearch = false"
+              class="w-10 h-10 rounded-xl flex items-center justify-center text-white/60"
+            >
+              ←
+            </button>
+            <div class="flex-1 relative">
+              <input
+                ref="mobileSearchInput"
+                v-model="keyword"
+                @keyup.enter="handleSearch"
+                type="text"
+                placeholder="搜索歌曲、歌手..."
+                class="w-full h-10 pl-10 pr-4 rounded-xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15"
+                autofocus
+              />
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-white/40">🔍</span>
+            </div>
+            <button
+              @click="handleSearch"
+              :disabled="loading"
+              class="h-10 px-4 rounded-xl bg-purple-600 text-white disabled:opacity-50"
+            >
+              {{ loading ? '...' : '搜索' }}
+            </button>
+          </div>
+          <!-- 音质选择 -->
+          <div class="flex items-center gap-2 mt-3">
+            <span class="text-white/40 text-xs">音质:</span>
+            <div class="flex gap-1">
+              <button
+                v-for="q in qualities"
+                :key="q.value"
+                @click="quality = q.value"
+                :class="[
+                  'px-3 py-1 rounded-full text-xs transition-colors',
+                  quality === q.value ? 'bg-purple-600 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                {{ q.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 搜索结果 -->
+        <div class="flex-1 overflow-y-auto p-4">
+          <div v-if="loading" class="text-center py-10 text-white/40">
+            搜索中...
+          </div>
+          <div v-else-if="searchResults.length === 0" class="text-center py-10 text-white/40">
+            输入关键词搜索歌曲
+          </div>
+          <div v-else class="space-y-1">
+            <div
+              v-for="result in searchResults"
+              :key="`${result.platform}-${result.id}`"
+              class="flex items-center gap-3 p-3 rounded-xl active:bg-white/10"
+              @click="playNow(result); showMobileSearch = false"
+            >
+              <span class="text-lg">{{ getPlatformIcon(result.platform) }}</span>
+              <div class="flex-1 min-w-0">
+                <p class="text-white text-sm truncate">{{ result.name }}</p>
+                <p class="text-white/50 text-xs truncate">{{ result.artist }}</p>
+              </div>
+              <button
+                @click.stop="addToPlaylist(result)"
+                class="px-3 py-1.5 text-xs rounded-lg bg-white/10 text-white/70"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -190,5 +289,17 @@ function getPlatformIcon(platform: string) {
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+.modal-enter-active, .modal-leave-active {
+  transition: opacity 0.25s, transform 0.25s;
+}
+.modal-enter-from {
+  opacity: 0;
+  transform: translateY(100%);
+}
+.modal-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
 }
 </style>

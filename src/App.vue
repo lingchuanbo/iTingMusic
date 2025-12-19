@@ -14,6 +14,7 @@ import FavoriteView from '@/components/FavoriteView.vue'
 import WebDAVView from '@/components/WebDAVView.vue'
 import LocalView from '@/components/LocalView.vue'
 import SettingsView from '@/components/SettingsView.vue'
+import MobileNav from '@/components/MobileNav.vue'
 
 const store = usePlayerStore()
 const activeView = ref('home')
@@ -32,7 +33,7 @@ const bgStyle = computed(() => {
 // 监听歌曲切换
 watch(() => store.currentTrack, (track) => {
   if (track) {
-    audioPlayer.play(track.url)
+    audioPlayer.play(track.url, track)
   }
 })
 
@@ -57,12 +58,12 @@ function handleNavigate(id: string) {
     </div>
 
     <!-- 主布局 -->
-    <div class="relative z-10 h-full flex">
-      <!-- 侧边栏 -->
-      <Sidebar :active-view="activeView" @navigate="handleNavigate" />
+    <div class="relative z-10 h-full flex flex-col md:flex-row">
+      <!-- 侧边栏 - 桌面端显示在左侧 -->
+      <Sidebar :active-view="activeView" @navigate="handleNavigate" class="hidden md:flex" />
 
-      <!-- 主内容区 -->
-      <main class="flex-1 flex flex-col overflow-hidden">
+      <!-- 主内容区 - 移动端需要为底部导航+播放栏留出空间 -->
+      <main class="flex-1 flex flex-col overflow-hidden mobile-main-content md:pb-14">
         <!-- 首页：搜索 + 播放列表 -->
         <template v-if="activeView === 'home'">
           <SearchBar />
@@ -92,6 +93,9 @@ function handleNavigate(id: string) {
       </main>
     </div>
 
+    <!-- 移动端底部导航 -->
+    <MobileNav :active-view="activeView" @navigate="handleNavigate" class="md:hidden" />
+
     <!-- 悬浮播放栏 -->
     <PlayerBar />
 
@@ -99,3 +103,16 @@ function handleNavigate(id: string) {
     <LyricsPanel />
   </div>
 </template>
+
+<style>
+/* 移动端主内容区底部间距 */
+.mobile-main-content {
+  padding-bottom: calc(3.5rem + 4rem + env(safe-area-inset-bottom, 0px)); /* 导航栏 + 播放栏 + 安全区域 */
+}
+
+@media (min-width: 768px) {
+  .mobile-main-content {
+    padding-bottom: 3.5rem; /* 桌面端只需要播放栏高度 */
+  }
+}
+</style>

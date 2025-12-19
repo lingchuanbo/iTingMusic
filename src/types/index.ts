@@ -11,6 +11,7 @@ export interface Track {
   // 在线歌曲额外信息
   _platform?: string
   _songId?: string
+  _cached?: boolean
 }
 
 export interface LyricLine {

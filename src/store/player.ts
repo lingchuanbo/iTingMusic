@@ -14,13 +14,14 @@ function loadFromStorage() {
         playlist: parsed.playlist || [],
         currentIndex: parsed.currentIndex ?? -1,
         volume: parsed.volume ?? 0.8,
-        playMode: parsed.playMode || 'sequence'
+        playMode: parsed.playMode || 'sequence',
+        backgroundPlayEnabled: parsed.backgroundPlayEnabled ?? true
       }
     }
   } catch (e) {
     console.error('加载播放数据失败:', e)
   }
-  return { playlist: [], currentIndex: -1, volume: 0.8, playMode: 'sequence' }
+  return { playlist: [], currentIndex: -1, volume: 0.8, playMode: 'sequence', backgroundPlayEnabled: true }
 }
 
 export const usePlayerStore = defineStore('player', () => {
@@ -36,6 +37,7 @@ export const usePlayerStore = defineStore('player', () => {
   const volume = ref(saved.volume)
   const playMode = ref<PlayMode>(saved.playMode as PlayMode)
   const showLyrics = ref(false)
+  const backgroundPlayEnabled = ref(saved.backgroundPlayEnabled)
 
   // 计算属性
   const currentTrack = computed(() =>
@@ -61,7 +63,8 @@ export const usePlayerStore = defineStore('player', () => {
         playlist: savablePlaylist,
         currentIndex: currentIndex.value,
         volume: volume.value,
-        playMode: playMode.value
+        playMode: playMode.value,
+        backgroundPlayEnabled: backgroundPlayEnabled.value
       }))
     } catch (e) {
       console.error('保存播放数据失败:', e)
@@ -69,7 +72,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // 监听变化自动保存
-  watch([playlist, currentIndex, volume, playMode], saveToStorage, { deep: true })
+  watch([playlist, currentIndex, volume, playMode, backgroundPlayEnabled], saveToStorage, { deep: true })
 
   // 操作
   function setPlaylist(tracks: Track[]) {
@@ -138,10 +141,14 @@ export const usePlayerStore = defineStore('player', () => {
     currentIndex.value = -1
   }
 
+  function toggleBackgroundPlay() {
+    backgroundPlayEnabled.value = !backgroundPlayEnabled.value
+  }
+
   return {
-    playlist, currentIndex, isPlaying, currentTime, duration, volume, playMode, showLyrics,
+    playlist, currentIndex, isPlaying, currentTime, duration, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
-    setCurrentTime, setDuration, setVolume, togglePlayMode, toggleLyrics, clearPlaylist
+    setCurrentTime, setDuration, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, toggleBackgroundPlay
   }
 })

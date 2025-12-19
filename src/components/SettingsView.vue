@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import type { AudioQuality } from '@/services/source/OnlineApiSource'
 import {
@@ -8,8 +8,33 @@ import {
   getDefaultConfig,
   type AIConfig
 } from '@/services/ai/AIService'
+import { audioCache } from '@/services/cache/AudioCache'
 
 const store = usePlayerStore()
+
+// 缓存统计
+const cacheStats = ref({ count: 0, totalSize: 0 })
+const cacheLoading = ref(false)
+
+async function loadCacheStats() {
+  cacheStats.value = await audioCache.getStats()
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+}
+
+async function clearCache() {
+  if (!confirm('确定清空所有缓存（音频、封面、歌词）？')) return
+  cacheLoading.value = true
+  await audioCache.clearAll()
+  await loadCacheStats()
+  cacheLoading.value = false
+}
+
+onMounted(loadCacheStats)
 
 // 音质设置
 const defaultQuality = ref<AudioQuality>(
@@ -259,6 +284,31 @@ function clearAIConfig() {
           @input="store.setVolume(Number(($event.target as HTMLInputElement).value))"
           class="w-full accent-purple-500"
         />
+      </section>
+
+      <!-- 音频缓存 -->
+      <section>
+        <h3 class="text-white/80 font-medium mb-3">💾 音频缓存</h3>
+        <div class="p-4 rounded-lg bg-white/5 space-y-3">
+          <div class="flex justify-between text-white/70">
+            <span>已缓存歌曲</span>
+            <span>{{ cacheStats.count }} 首</span>
+          </div>
+          <div class="flex justify-between text-white/70">
+            <span>占用空间</span>
+            <span>{{ formatSize(cacheStats.totalSize) }}</span>
+          </div>
+          <p class="text-white/40 text-xs">
+            播放过的在线歌曲会自动缓存，下次播放无需联网
+          </p>
+          <button
+            @click="clearCache"
+            :disabled="cacheLoading || cacheStats.count === 0"
+            class="w-full p-2 rounded-lg bg-red-600/30 hover:bg-red-600/50 text-red-300 text-sm disabled:opacity-50"
+          >
+            {{ cacheLoading ? '清理中...' : '清空缓存' }}
+          </button>
+        </div>
       </section>
 
       <!-- 数据管理 -->

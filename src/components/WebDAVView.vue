@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { usePlayerStore } from '@/store/player'
-import { connectWebDAV, scanWebDAV, isConnected } from '@/services/source/WebDAVSource'
+import { connectWebDAV, scanWebDAV } from '@/services/source/WebDAVSource'
 
 const store = usePlayerStore()
 const config = ref({

@@ -11,11 +11,6 @@ const favorites = computed(() => {
   return store.playlist.filter(t => ids.includes(t.id))
 })
 
-function isFavorite(id: string) {
-  const ids = JSON.parse(localStorage.getItem('favorites') || '[]')
-  return ids.includes(id)
-}
-
 function toggleFavorite(id: string) {
   const ids = JSON.parse(localStorage.getItem('favorites') || '[]')
   const idx = ids.indexOf(id)
