@@ -1,7 +1,41 @@
 import type { Track } from '@/types'
+import { Capacitor } from '@capacitor/core'
+import { CapacitorHttp, type HttpResponse } from '@capacitor/core'
 
 // 开发环境使用代理，生产环境直接请求
 const API_BASE = import.meta.env.DEV ? '/api' : 'https://music-dl.sayqz.com/api'
+
+// 封装 fetch，在原生平台使用 CapacitorHttp 绕过 CORS
+async function nativeFetch(url: string): Promise<Response> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const response: HttpResponse = await CapacitorHttp.get({ url })
+      return new Response(JSON.stringify(response.data), {
+        status: response.status,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    } catch (e) {
+      console.error('CapacitorHttp 请求失败:', e)
+      throw e
+    }
+  }
+  return fetch(url)
+}
+
+// 获取文本内容
+async function nativeFetchText(url: string): Promise<string> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const response: HttpResponse = await CapacitorHttp.get({ url })
+      return typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+    } catch (e) {
+      console.error('CapacitorHttp 请求失败:', e)
+      throw e
+    }
+  }
+  const res = await fetch(url)
+  return res.text()
+}
 
 export type MusicSource = 'netease' | 'kuwo' | 'kugou' | 'qq' | 'migu'
 export type AudioQuality = '128k' | '320k' | 'flac' | 'flac24bit'
@@ -52,7 +86,7 @@ export interface ToplistItem {
 // 1. 获取歌曲基本信息
 export async function getSongInfo(source: MusicSource, id: string): Promise<SongInfo | null> {
   try {
-    const res = await fetch(`${API_BASE}/?source=${source}&id=${id}&type=info`)
+    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=info`)
     const json: ApiResponse<SongInfo> = await res.json()
     if (json.code === 200) return json.data
     return null
@@ -68,7 +102,11 @@ export function getMusicUrl(source: MusicSource, id: string, quality: AudioQuali
 }
 
 // 2.1 获取实际的音频文件URL（解析重定向）
-export async function getActualMusicUrl(source: MusicSource, id: string, quality: AudioQuality = '320k'): Promise<string> {
+export async function getActualMusicUrl(
+  source: MusicSource,
+  id: string,
+  quality: AudioQuality = '320k'
+): Promise<string> {
   // 直接返回 API URL，让播放器自己处理重定向
   // 这样可以避免 CORS 问题
   return getMusicUrl(source, id, quality)
@@ -82,8 +120,7 @@ export function getCoverUrl(source: MusicSource, id: string): string {
 // 4. 获取歌词
 export async function getLyrics(source: MusicSource, id: string): Promise<string> {
   try {
-    const res = await fetch(`${API_BASE}/?source=${source}&id=${id}&type=lrc`)
-    return await res.text()
+    return await nativeFetchText(`${API_BASE}/?source=${source}&id=${id}&type=lrc`)
   } catch (e) {
     console.error('获取歌词失败:', e)
     return ''
@@ -97,7 +134,7 @@ export async function searchSongs(
   limit: number = 20
 ): Promise<SearchResult[]> {
   try {
-    const res = await fetch(
+    const res = await nativeFetch(
       `${API_BASE}/?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&limit=${limit}`
     )
     const json: ApiResponse<SearchData> = await res.json()
@@ -112,7 +149,7 @@ export async function searchSongs(
 // 6. 聚合搜索 (多平台)
 export async function aggregateSearch(keyword: string): Promise<SearchResult[]> {
   try {
-    const res = await fetch(
+    const res = await nativeFetch(
       `${API_BASE}/?type=aggregateSearch&keyword=${encodeURIComponent(keyword)}`
     )
     const json: ApiResponse<SearchData> = await res.json()
@@ -127,7 +164,7 @@ export async function aggregateSearch(keyword: string): Promise<SearchResult[]> 
 // 7. 获取歌单详情
 export async function getPlaylist(source: MusicSource, id: string): Promise<PlaylistInfo | null> {
   try {
-    const res = await fetch(`${API_BASE}/?source=${source}&id=${id}&type=playlist`)
+    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=playlist`)
     const json: ApiResponse<PlaylistInfo> = await res.json()
     if (json.code === 200) return json.data
     return null
@@ -160,7 +197,7 @@ export async function getPlaylistSongs(source: MusicSource, id: string): Promise
 // 8. 获取排行榜列表
 export async function getToplists(source: MusicSource): Promise<ToplistItem[]> {
   try {
-    const res = await fetch(`${API_BASE}/?source=${source}&type=toplists`)
+    const res = await nativeFetch(`${API_BASE}/?source=${source}&type=toplists`)
     const json: ApiResponse<{ list: ToplistItem[] }> = await res.json()
     if (json.code === 200) return json.data.list
     return []
@@ -173,7 +210,7 @@ export async function getToplists(source: MusicSource): Promise<ToplistItem[]> {
 // 9. 获取排行榜歌曲
 export async function getToplistSongs(source: MusicSource, id: string): Promise<SearchResult[]> {
   try {
-    const res = await fetch(`${API_BASE}/?source=${source}&id=${id}&type=toplist`)
+    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=toplist`)
     const json: ApiResponse<{ list: SearchResult[]; source: string }> = await res.json()
     if (json.code === 200) {
       return json.data.list.map(item => ({ ...item, platform: source }))

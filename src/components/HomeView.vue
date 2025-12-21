@@ -29,9 +29,9 @@ const newSongs = ref<SearchResult[]>([]) // 新歌速递 - 新歌榜
 const toplists = ref<ToplistItem[]>([])
 const currentBannerIndex = ref(0)
 
-// 缓存配置
-const CACHE_KEY = 'home_recommend_cache_v2'
-const CACHE_TIME_KEY = 'home_recommend_cache_time_v2'
+// 缓存配置 - 更新版本号强制刷新
+const CACHE_KEY = 'home_recommend_cache_v3'
+const CACHE_TIME_KEY = 'home_recommend_cache_time_v3'
 const CACHE_DURATION = 2 * 60 * 60 * 1000
 
 // Banner 拖动相关
@@ -131,14 +131,24 @@ async function loadRecommendData() {
       qqNew,          // QQ音乐新歌榜
       toplistData
     ] = await Promise.all([
-      getToplistSongs('netease', '19723756').catch(() => []),  // 网易云飙升榜
-      getToplistSongs('qq', '62').catch(() => []),             // QQ音乐热歌榜（作为飙升）
-      getToplistSongs('netease', '3778678').catch(() => []),   // 网易云热歌榜
-      getToplistSongs('qq', '26').catch(() => []),             // QQ音乐热歌榜
-      getToplistSongs('netease', '3779629').catch(() => []),   // 网易云新歌榜
-      getToplistSongs('qq', '27').catch(() => []),             // QQ音乐新歌榜
-      getToplists('netease').catch(() => [])
+      getToplistSongs('netease', '19723756').catch(e => { console.warn('网易云飙升榜失败:', e); return [] }),
+      getToplistSongs('qq', '62').catch(e => { console.warn('QQ热歌榜失败:', e); return [] }),
+      getToplistSongs('netease', '3778678').catch(e => { console.warn('网易云热歌榜失败:', e); return [] }),
+      getToplistSongs('qq', '26').catch(e => { console.warn('QQ热歌榜26失败:', e); return [] }),
+      getToplistSongs('netease', '3779629').catch(e => { console.warn('网易云新歌榜失败:', e); return [] }),
+      getToplistSongs('qq', '27').catch(e => { console.warn('QQ新歌榜失败:', e); return [] }),
+      getToplists('netease').catch(e => { console.warn('排行榜列表失败:', e); return [] })
     ])
+
+    console.log('API 返回数据:', {
+      neteaseSurge: neteaseSurge.length,
+      qqSurge: qqSurge.length,
+      neteaseHot: neteaseHot.length,
+      qqHot: qqHot.length,
+      neteaseNew: neteaseNew.length,
+      qqNew: qqNew.length,
+      toplistData: toplistData.length
+    })
 
     // 去重函数
     const dedup = (songs: SearchResult[]) => {
@@ -152,34 +162,31 @@ async function loadRecommendData() {
     }
 
     // 轮播图 - 混合飙升榜，交替展示
-    const mixedSurge = dedup([
-      ...neteaseSurge.slice(0, 3),
-      ...qqSurge.slice(0, 3)
-    ].sort(() => Math.random() - 0.5))
-    bannerSongs.value = mixedSurge.slice(0, 5)
+    const allSurge = [...neteaseSurge.slice(0, 5), ...qqSurge.slice(0, 5)]
+    const mixedSurge = dedup(allSurge.length > 0 ? allSurge : neteaseSurge.slice(0, 5))
+    bannerSongs.value = mixedSurge.sort(() => Math.random() - 0.5).slice(0, 5)
 
     // 热歌榜 - 混合两个平台热歌
-    const mixedHot = dedup([
-      ...neteaseHot.slice(0, 8),
-      ...qqHot.slice(0, 8)
-    ].sort(() => Math.random() - 0.5))
-    hotSongs.value = mixedHot.slice(0, 10)
+    const allHot = [...neteaseHot.slice(0, 8), ...qqHot.slice(0, 8)]
+    const mixedHot = dedup(allHot.length > 0 ? allHot : neteaseHot.slice(0, 10))
+    hotSongs.value = mixedHot.sort(() => Math.random() - 0.5).slice(0, 10)
 
     // 新歌榜 - 混合两个平台新歌
-    const mixedNew = dedup([
-      ...neteaseNew.slice(0, 8),
-      ...qqNew.slice(0, 8)
-    ].sort(() => Math.random() - 0.5))
-    newSongs.value = mixedNew.slice(0, 10)
+    const allNew = [...neteaseNew.slice(0, 8), ...qqNew.slice(0, 8)]
+    const mixedNew = dedup(allNew.length > 0 ? allNew : neteaseNew.slice(0, 10))
+    newSongs.value = mixedNew.sort(() => Math.random() - 0.5).slice(0, 10)
 
     toplists.value = toplistData.slice(0, 6)
 
-    saveCache({
-      bannerSongs: bannerSongs.value,
-      hotSongs: hotSongs.value,
-      newSongs: newSongs.value,
-      toplists: toplists.value
-    })
+    // 只有有数据时才缓存
+    if (bannerSongs.value.length > 0 || hotSongs.value.length > 0) {
+      saveCache({
+        bannerSongs: bannerSongs.value,
+        hotSongs: hotSongs.value,
+        newSongs: newSongs.value,
+        toplists: toplists.value
+      })
+    }
   } catch (e: any) {
     console.error('加载推荐数据失败:', e)
     loadError.value = e?.message || '网络连接失败，请检查网络'
