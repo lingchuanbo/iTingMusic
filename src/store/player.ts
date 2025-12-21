@@ -31,6 +31,7 @@ export const usePlayerStore = defineStore('player', () => {
   // 状态
   const playlist = ref<Track[]>(saved.playlist)
   const currentIndex = ref(saved.currentIndex)
+  const playVersion = ref(0) // 播放版本号，用于强制触发播放
   const isPlaying = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
@@ -89,7 +90,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   function playTrack(index: number) {
     if (index >= 0 && index < playlist.value.length) {
+      // 重置播放时间
+      currentTime.value = 0
+      duration.value = 0
+      // 更新索引
       currentIndex.value = index
+      // 增加版本号强制触发播放（即使是同一首歌）
+      playVersion.value++
       isPlaying.value = true
     }
   }
@@ -100,18 +107,32 @@ export const usePlayerStore = defineStore('player', () => {
 
   function nextTrack() {
     if (playlist.value.length === 0) return
+    // 重置播放时间
+    currentTime.value = 0
+    duration.value = 0
+    
     if (playMode.value === 'shuffle') {
       currentIndex.value = Math.floor(Math.random() * playlist.value.length)
     } else {
       currentIndex.value = (currentIndex.value + 1) % playlist.value.length
     }
+    // 增加版本号触发播放
+    playVersion.value++
+    isPlaying.value = true
   }
 
   function prevTrack() {
     if (playlist.value.length === 0) return
+    // 重置播放时间
+    currentTime.value = 0
+    duration.value = 0
+    
     currentIndex.value = currentIndex.value <= 0
       ? playlist.value.length - 1
       : currentIndex.value - 1
+    // 增加版本号触发播放
+    playVersion.value++
+    isPlaying.value = true
   }
 
   function setCurrentTime(time: number) {
@@ -146,7 +167,7 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   return {
-    playlist, currentIndex, isPlaying, currentTime, duration, volume, playMode, showLyrics, backgroundPlayEnabled,
+    playlist, currentIndex, playVersion, isPlaying, currentTime, duration, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
     setCurrentTime, setDuration, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, toggleBackgroundPlay

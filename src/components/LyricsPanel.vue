@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
@@ -320,8 +320,8 @@ const isTouching = ref(false) // 手指是否在触摸
 
 // 自动滚动到当前歌词
 watch(currentLyricIndex, (index) => {
-  // 用户正在滚动时不自动滚动
-  if (isUserScrolling.value) return
+  // 用户正在滚动时不自动滚动，或者歌词面板未显示歌词视图
+  if (isUserScrolling.value || !showLyrics.value) return
   if (index >= 0 && lyricsContainer.value) {
     const el = lyricsContainer.value.children[index] as HTMLElement
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -348,8 +348,11 @@ function handleLyricsTouchEnd() {
       store.setCurrentTime(targetTime)
     }
     // 跳转后恢复自动滚动
-    isUserScrolling.value = false
     seekingLyricIndex.value = -1
+    // 延迟恢复自动滚动，避免跳转后立即被自动滚动覆盖
+    userScrollTimer.value = window.setTimeout(() => {
+      isUserScrolling.value = false
+    }, 500)
   }, 100)
 }
 
@@ -412,6 +415,34 @@ watch(() => store.showLyrics, async (show) => {
   // 重置为唱片视图
   if (show) showLyrics.value = false
 })
+
+// 当切换到歌词视图时，滚动到当前歌词位置
+watch(showLyrics, (show) => {
+  if (show) {
+    // 重置用户滚动状态
+    isUserScrolling.value = false
+    // 使用 nextTick 确保 DOM 更新后立即滚动
+    nextTick(() => {
+      scrollToCurrentLyric()
+    })
+  }
+})
+
+// 滚动到当前歌词位置
+function scrollToCurrentLyric() {
+  const index = currentLyricIndex.value
+  if (index >= 0 && lyricsContainer.value && lyricsContainer.value.children[index]) {
+    const el = lyricsContainer.value.children[index] as HTMLElement
+    // 直接设置 scrollTop 实现即时滚动
+    const scrollArea = lyricsScrollArea.value
+    if (scrollArea) {
+      const elTop = el.offsetTop
+      const elHeight = el.offsetHeight
+      const scrollAreaHeight = scrollArea.clientHeight
+      scrollArea.scrollTop = elTop - scrollAreaHeight / 2 + elHeight / 2
+    }
+  }
+}
 
 function handleToggle() {
   audioPlayer.toggle()

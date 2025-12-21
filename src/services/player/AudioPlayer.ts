@@ -89,7 +89,7 @@ class AudioPlayer {
       store.isPlaying = true
       this.startNativeProgress()
       if (store.backgroundPlayEnabled) {
-        backgroundMode.enable()
+        backgroundMode.enable(track?.title, track?.artist)
       }
     }
 
@@ -138,7 +138,7 @@ class AudioPlayer {
         store.isPlaying = true
         this.startHowlerProgress()
         if (store.backgroundPlayEnabled) {
-          backgroundMode.enable()
+          backgroundMode.enable(track?.title, track?.artist)
         }
       },
       onpause: () => {
@@ -207,10 +207,26 @@ class AudioPlayer {
   }
 
   seek(time: number) {
+    const store = usePlayerStore()
+    // 立即更新 store 中的时间
+    store.setCurrentTime(time)
+    
     if (this.useNativeAudio && this.audio) {
       this.audio.currentTime = time
-    } else {
-      this.howl?.seek(time)
+      // 确保进度更新继续
+      if (!this.audio.paused) {
+        this.startNativeProgress()
+      }
+    } else if (this.howl) {
+      this.howl.seek(time)
+      // seek 后延迟重新启动进度更新，因为 playing() 可能暂时返回 false
+      if (store.isPlaying) {
+        setTimeout(() => {
+          if (this.howl && store.isPlaying) {
+            this.startHowlerProgress()
+          }
+        }, 50)
+      }
     }
   }
 
@@ -223,22 +239,42 @@ class AudioPlayer {
   }
 
   private startNativeProgress() {
+    // 先取消之前的更新循环
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+    
     const store = usePlayerStore()
     const update = () => {
       if (this.audio && !this.audio.paused) {
         store.setCurrentTime(this.audio.currentTime)
         this.rafId = requestAnimationFrame(update)
+      } else {
+        this.rafId = null
       }
     }
     update()
   }
 
   private startHowlerProgress() {
+    // 先取消之前的更新循环
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+    
     const store = usePlayerStore()
     const update = () => {
-      if (this.howl?.playing()) {
-        store.setCurrentTime(this.howl.seek() as number)
+      // 使用 store.isPlaying 判断，因为 howl.playing() 在某些情况下不可靠
+      if (this.howl && store.isPlaying) {
+        const currentSeek = this.howl.seek()
+        if (typeof currentSeek === 'number') {
+          store.setCurrentTime(currentSeek)
+        }
         this.rafId = requestAnimationFrame(update)
+      } else {
+        this.rafId = null
       }
     }
     update()
@@ -261,7 +297,7 @@ class AudioPlayer {
   /**
    * 设置后台播放状态
    */
-  setBackgroundPlay(enabled: boolean) {
+  setBackgroundPlay(enabled: boolean, track?: Track) {
     const store = usePlayerStore()
     store.backgroundPlayEnabled = enabled
     const isPlaying = this.useNativeAudio 
@@ -269,11 +305,19 @@ class AudioPlayer {
       : this.howl?.playing()
     
     if (enabled && isPlaying) {
-      backgroundMode.enable()
-    } else {
+      backgroundMode.enable(track?.title || store.currentTrack?.title, track?.artist || store.currentTrack?.artist)
+    } else if (!enabled) {
       backgroundMode.disable()
     }
   }
+
+  /**
+   * 更新通知栏信息（切歌时调用）
+   */
+  updateNotification(title: string, artist: string) {
+    backgroundMode.updateNotification(title, artist)
+  }
 }
+
 
 export const audioPlayer = new AudioPlayer()

@@ -35,8 +35,9 @@ const bgStyle = computed(() => {
   }
 })
 
-// 监听歌曲切换
-watch(() => store.currentTrack, (track) => {
+// 监听歌曲切换 - 使用 playVersion 确保每次点击都触发播放
+watch(() => store.playVersion, () => {
+  const track = store.currentTrack
   if (track) {
     audioPlayer.play(track.url, track)
   }

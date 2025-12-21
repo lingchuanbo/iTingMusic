@@ -137,6 +137,26 @@ export async function getPlaylist(source: MusicSource, id: string): Promise<Play
   }
 }
 
+// 7.1 获取歌单歌曲列表
+export async function getPlaylistSongs(source: MusicSource, id: string): Promise<SearchResult[]> {
+  try {
+    const playlist = await getPlaylist(source, id)
+    if (playlist && playlist.list) {
+      return playlist.list.map(item => ({
+        id: item.id,
+        name: item.name,
+        artist: '', // 歌单 API 可能不返回艺人信息
+        url: '',
+        platform: source
+      }))
+    }
+    return []
+  } catch (e) {
+    console.error('获取歌单歌曲失败:', e)
+    return []
+  }
+}
+
 // 8. 获取排行榜列表
 export async function getToplists(source: MusicSource): Promise<ToplistItem[]> {
   try {
