@@ -11,7 +11,14 @@ const config: CapacitorConfig = {
   },
   android: {
     // 允许混合内容和跨域
-    allowMixedContent: true
+    allowMixedContent: true,
+    // 后台运行配置
+    backgroundColor: '#000000'
+  },
+  plugins: {
+    SplashScreen: {
+      launchAutoHide: true
+    }
   }
 }
 

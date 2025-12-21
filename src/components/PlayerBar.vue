@@ -9,7 +9,18 @@ const showPlaylist = ref(false)
 
 // 播放控制
 function handleToggle() {
-  audioPlayer.toggle()
+  // 如果有当前歌曲但没有在播放（比如刚打开应用），需要重新加载播放
+  if (store.currentTrack && !store.isPlaying) {
+    // 尝试 toggle，如果 audio 不存在会触发重新播放
+    const toggled = audioPlayer.toggle()
+    if (!toggled) {
+      // audio 不存在，重新播放当前歌曲
+      store.playTrack(store.currentIndex)
+      return
+    }
+  } else {
+    audioPlayer.toggle()
+  }
   store.togglePlay()
 }
 
@@ -48,10 +59,21 @@ function clearPlaylist() {
     class="fixed left-0 right-0 z-50 bg-zinc-900/98 backdrop-blur-xl border-t border-white/10 mobile-player-bar md:bottom-0"
   >
     <!-- 进度条（顶部极细线） -->
-    <div class="h-0.5 bg-black/5 dark:bg-white/10">
+    <div class="h-0.5 bg-black/5 dark:bg-white/10 relative">
+      <!-- 缓冲进度（深灰色） -->
       <div
-        class="h-full bg-purple-500 transition-all duration-100"
+        class="absolute h-full bg-zinc-600 transition-all duration-300"
+        :style="{ width: `${store.buffered}%` }"
+      ></div>
+      <!-- 播放进度（紫色） -->
+      <div
+        class="absolute h-full bg-purple-500 transition-all duration-100"
         :style="{ width: `${store.progress}%` }"
+      ></div>
+      <!-- 缓存完成指示（绿色小点） -->
+      <div
+        v-if="store.isCached"
+        class="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-green-500"
       ></div>
     </div>
 

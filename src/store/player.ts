@@ -35,6 +35,8 @@ export const usePlayerStore = defineStore('player', () => {
   const isPlaying = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
+  const buffered = ref(0) // 缓冲进度 0-100
+  const isCached = ref(false) // 当前歌曲是否已缓存
   const volume = ref(saved.volume)
   const playMode = ref<PlayMode>(saved.playMode as PlayMode)
   const showLyrics = ref(false)
@@ -143,6 +145,14 @@ export const usePlayerStore = defineStore('player', () => {
     duration.value = d
   }
 
+  function setBuffered(b: number) {
+    buffered.value = Math.max(0, Math.min(100, b))
+  }
+
+  function setCached(cached: boolean) {
+    isCached.value = cached
+  }
+
   function setVolume(v: number) {
     volume.value = Math.max(0, Math.min(1, v))
   }
@@ -167,9 +177,9 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   return {
-    playlist, currentIndex, playVersion, isPlaying, currentTime, duration, volume, playMode, showLyrics, backgroundPlayEnabled,
+    playlist, currentIndex, playVersion, isPlaying, currentTime, duration, buffered, isCached, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
-    setCurrentTime, setDuration, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, toggleBackgroundPlay
+    setCurrentTime, setDuration, setBuffered, setCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, toggleBackgroundPlay
   }
 })
