@@ -330,6 +330,16 @@ export async function getAIRecommendations(
   }
 
   try {
+    // 检查是否是混合内容问题（HTTPS 页面请求 HTTP API）
+    const isSecurePage = typeof window !== 'undefined' && window.location.protocol === 'https:'
+    const isHttpApi = config.baseUrl.startsWith('http://')
+    if (isSecurePage && isHttpApi) {
+      throw new Error('安全限制：当前页面使用 HTTPS，无法连接 HTTP 的 API 地址。请使用 HTTPS 的 API 地址，或通过 HTTP 访问本应用。')
+    }
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30秒超时
+
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -345,8 +355,21 @@ export async function getAIRecommendations(
         temperature: 0.8,
         max_tokens: 1000,
         stream: true
-      })
+      }),
+      signal: controller.signal
+    }).catch(err => {
+      clearTimeout(timeoutId)
+      // 网络错误的友好提示
+      if (err.name === 'AbortError') {
+        throw new Error('连接超时，请检查网络或 API 地址是否正确')
+      }
+      if (err.name === 'TypeError' && err.message.includes('Failed to fetch')) {
+        throw new Error('无法连接到 API 服务器。可能原因：\n1. API 地址不正确\n2. 服务器未启用 CORS\n3. 网络连接问题\n4. 移动端可能需要使用 HTTPS 地址')
+      }
+      throw err
     })
+
+    clearTimeout(timeoutId)
 
     if (!response.ok) {
       const error = await response.text()

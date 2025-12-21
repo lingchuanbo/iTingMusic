@@ -1,57 +1,32 @@
 /**
  * 后台/息屏播放服务
- * 使用 Capacitor Background Task 保持音频在后台播放
+ * Web 环境下为空实现，原生 App 打包时再添加 Capacitor 依赖
  */
 
-import { Capacitor } from '@capacitor/core'
-import { BackgroundTask } from '@capawesome/capacitor-background-task'
-
 class BackgroundModeService {
-  private taskId: string | null = null
   private isEnabled = false
 
   /**
    * 检查是否在原生平台
    */
   isNative(): boolean {
-    return Capacitor.isNativePlatform()
+    // Web 环境始终返回 false
+    return false
   }
 
   /**
    * 启用后台播放模式
    */
   async enable(): Promise<void> {
-    if (!this.isNative() || this.isEnabled) return
-
-    try {
-      // 开始后台任务
-      const taskId = await BackgroundTask.beforeExit(async () => {
-        // 这个回调会在应用进入后台时执行
-        console.log('进入后台模式，保持音频播放')
-      })
-      
-      this.taskId = taskId
-      this.isEnabled = true
-      console.log('后台播放模式已启用')
-    } catch (e) {
-      console.warn('启用后台播放失败:', e)
-    }
+    // Web 环境下无需处理，浏览器本身支持后台音频播放
+    this.isEnabled = true
   }
 
   /**
    * 禁用后台播放模式
    */
   async disable(): Promise<void> {
-    if (!this.isNative() || !this.isEnabled || !this.taskId) return
-
-    try {
-      await BackgroundTask.finish({ taskId: this.taskId })
-      this.taskId = null
-      this.isEnabled = false
-      console.log('后台播放模式已禁用')
-    } catch (e) {
-      console.warn('禁用后台播放失败:', e)
-    }
+    this.isEnabled = false
   }
 
   /**

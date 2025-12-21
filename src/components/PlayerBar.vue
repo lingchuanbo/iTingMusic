@@ -1,14 +1,43 @@
 <script setup lang="ts">
-
+import { ref } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
+import { formatTime } from '@/utils/formatTime'
 
 const store = usePlayerStore()
+const showPlaylist = ref(false)
 
 // 播放控制
 function handleToggle() {
   audioPlayer.toggle()
   store.togglePlay()
+}
+
+// 切换播放列表浮窗
+function togglePlaylist() {
+  showPlaylist.value = !showPlaylist.value
+}
+
+// 播放指定歌曲
+function playSong(index: number) {
+  store.playTrack(index)
+}
+
+// 从列表移除
+function removeTrack(index: number) {
+  store.playlist.splice(index, 1)
+  if (store.currentIndex === index) {
+    store.currentIndex = -1
+  } else if (store.currentIndex > index) {
+    store.currentIndex--
+  }
+}
+
+// 清空播放列表
+function clearPlaylist() {
+  store.playlist.splice(0, store.playlist.length)
+  store.currentIndex = -1
+  showPlaylist.value = false
 }
 </script>
 
@@ -48,38 +77,126 @@ function handleToggle() {
 
       <!-- 歌曲信息 -->
       <div class="flex-1 min-w-0" @click="store.toggleLyrics()">
-        <p class="text-zinc-800 dark:text-white text-sm font-medium truncate">
+        <p class="text-white text-sm font-medium truncate">
           {{ store.currentTrack.title }}
-          <span class="text-zinc-400 dark:text-white/40 font-normal"> - {{ store.currentTrack.artist }}</span>
         </p>
+        <p class="text-white/60 text-xs truncate">{{ store.currentTrack.artist }}</p>
       </div>
 
       <!-- 播放/暂停按钮 -->
       <button
         @click="handleToggle"
-        class="w-9 h-9 rounded-full flex items-center justify-center text-zinc-600 dark:text-white/80 hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+        class="w-10 h-10 rounded-full flex items-center justify-center bg-purple-600 text-white shadow-lg shadow-purple-600/30 hover:bg-purple-500 active:scale-95 transition-all"
       >
-        <svg v-if="store.isPlaying" class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M10 8v8M14 8v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <svg v-if="store.isPlaying" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
         </svg>
-        <svg v-else class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="11" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          <path d="M10 8l6 4-6 4V8z" fill="currentColor"/>
+        <svg v-else class="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z"/>
         </svg>
       </button>
 
       <!-- 播放列表按钮 -->
       <button
-        @click="store.toggleLyrics()"
-        class="w-9 h-9 rounded-full flex items-center justify-center text-zinc-400 dark:text-white/50 hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+        @click="togglePlaylist"
+        :class="[
+          'w-9 h-9 rounded-full flex items-center justify-center transition-all',
+          showPlaylist ? 'bg-purple-600 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
+        ]"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
         </svg>
       </button>
     </div>
+
+    <!-- 播放列表浮窗 -->
+    <Transition name="playlist-popup">
+      <div 
+        v-if="showPlaylist"
+        class="absolute bottom-full left-0 right-0 mb-0 max-h-[60vh] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl"
+      >
+        <!-- 标题栏 -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <h3 class="text-white font-medium">播放列表</h3>
+            <span class="text-white/40 text-sm">({{ store.playlist.length }}首)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button 
+              @click="clearPlaylist"
+              class="px-3 py-1 rounded-lg text-white/50 text-sm hover:bg-white/10 hover:text-white/80 transition-colors"
+            >
+              清空
+            </button>
+            <button 
+              @click="showPlaylist = false"
+              class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:bg-white/20 transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        
+        <!-- 歌曲列表 -->
+        <div class="overflow-y-auto max-h-[calc(60vh-52px)]">
+          <div v-if="store.playlist.length === 0" class="py-12 text-center text-white/40">
+            <p class="text-3xl mb-2">🎵</p>
+            <p>播放列表为空</p>
+          </div>
+          <div 
+            v-for="(track, index) in store.playlist"
+            :key="track.id"
+            :class="[
+              'flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors group',
+              store.currentIndex === index ? 'bg-purple-600/20' : 'hover:bg-white/5'
+            ]"
+            @click="playSong(index)"
+          >
+            <!-- 序号/播放指示 -->
+            <div class="w-6 text-center flex-shrink-0">
+              <span v-if="store.currentIndex === index && store.isPlaying" class="text-purple-400">
+                <svg class="w-4 h-4 animate-pulse" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                </svg>
+              </span>
+              <span v-else :class="store.currentIndex === index ? 'text-purple-400' : 'text-white/30'">
+                {{ index + 1 }}
+              </span>
+            </div>
+            
+            <!-- 歌曲信息 -->
+            <div class="flex-1 min-w-0">
+              <p :class="['text-sm truncate', store.currentIndex === index ? 'text-purple-400' : 'text-white']">
+                {{ track.title }}
+              </p>
+              <p class="text-white/50 text-xs truncate">{{ track.artist }}</p>
+            </div>
+            
+            <!-- 时长 -->
+            <span class="text-white/30 text-xs">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+            
+            <!-- 删除按钮 -->
+            <button
+              @click.stop="removeTrack(index)"
+              class="w-7 h-7 rounded-full flex items-center justify-center text-white/30 opacity-0 group-hover:opacity-100 hover:bg-white/10 hover:text-red-400 transition-all"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
+
+  <!-- 点击外部关闭播放列表 -->
+  <div 
+    v-if="showPlaylist"
+    class="fixed inset-0 z-40"
+    @click="showPlaylist = false"
+  ></div>
 
   <!-- 无歌曲时不显示 -->
 </template>
@@ -104,5 +221,18 @@ function handleToggle() {
     bottom: 0;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
+}
+
+/* 播放列表浮窗动画 */
+.playlist-popup-enter-active {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.playlist-popup-leave-active {
+  transition: all 0.2s ease-in;
+}
+.playlist-popup-enter-from,
+.playlist-popup-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
 }
 </style>

@@ -1,14 +1,39 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
-import { Capacitor } from '@capacitor/core'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { getLyrics, type MusicSource } from '@/services/source/OnlineApiSource'
 import { formatTime } from '@/utils/formatTime'
 import { audioCache } from '@/services/cache/AudioCache'
 
 const store = usePlayerStore()
+
+// 处理浏览器返回按钮
+function handlePopState(e: PopStateEvent) {
+  if (store.showLyrics) {
+    e.preventDefault()
+    store.toggleLyrics()
+    // 重新添加历史记录，防止再次返回时退出应用
+    window.history.pushState({ lyricsOpen: false }, '')
+  }
+}
+
+// 监听歌词面板打开/关闭，管理历史记录
+watch(() => store.showLyrics, (isOpen) => {
+  if (isOpen) {
+    // 打开时添加历史记录
+    window.history.pushState({ lyricsOpen: true }, '')
+  }
+})
+
+onMounted(() => {
+  window.addEventListener('popstate', handlePopState)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('popstate', handlePopState)
+})
 const lyricsContainer = ref<HTMLElement>()
 const loadingLyrics = ref(false)
 const showLyrics = ref(false) // 是否显示歌词（点击切换）
@@ -393,8 +418,8 @@ function handleToggle() {
   store.togglePlay()
 }
 
-// 是否为原生平台
-const isNative = Capacitor.isNativePlatform()
+// 是否为原生平台（Web 环境下始终为 false）
+const isNative = false
 
 // 切换息屏播放
 function toggleBackgroundPlay() {
@@ -450,8 +475,8 @@ function updateProgress(e: TouchEvent | MouseEvent) {
         <div class="absolute inset-0 bg-black/60 backdrop-blur-3xl"></div>
       </div>
 
-      <!-- 顶部栏 -->
-      <div class="flex items-center justify-between px-4 py-3 flex-shrink-0 relative z-10">
+      <!-- 顶部栏 - 添加安全区域顶部间距 -->
+      <div class="flex items-center justify-between px-4 pt-safe-top pb-2 flex-shrink-0 relative z-10">
         <button 
           @click="store.toggleLyrics()"
           class="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors"
@@ -460,9 +485,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
           </svg>
         </button>
-        <div class="text-center flex-1">
-          <p class="text-white/60 text-xs">正在播放</p>
-        </div>
+        <div class="flex-1"></div>
         <!-- 切换展示模式 -->
         <button 
           @click.stop="toggleDisplayMode"
@@ -1001,6 +1024,11 @@ function updateProgress(e: TouchEvent | MouseEvent) {
 </template>
 
 <style scoped>
+/* 安全区域顶部间距 */
+.pt-safe-top {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 0.75rem);
+}
+
 .slide-enter-active,
 .slide-leave-active {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);

@@ -1,5 +1,4 @@
 import { Howl } from 'howler'
-import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
 import { audioCache } from '@/services/cache/AudioCache'
 import { backgroundMode } from '@/services/player/BackgroundMode'
@@ -14,13 +13,13 @@ interface OnlineTrack extends Track {
 
 class AudioPlayer {
   private howl: Howl | null = null
+  private audio: HTMLAudioElement | null = null
   private rafId: number | null = null
+  private useNativeAudio: boolean = false
 
-  /**
-   * 检查是否在原生平台
-   */
-  private isNative(): boolean {
-    return Capacitor.isNativePlatform()
+  constructor() {
+    // 统一使用 Howler，它在安卓上也能工作
+    this.useNativeAudio = false
   }
 
   /**
@@ -33,7 +32,7 @@ class AudioPlayer {
     let playUrl = url
     const onlineTrack = track as OnlineTrack
 
-    // 在线歌曲尝试使用缓存
+    // 在线歌曲处理
     if (track?.source === 'online' && track.id) {
       try {
         // 先检查缓存
@@ -41,43 +40,103 @@ class AudioPlayer {
         if (cachedUrl) {
           playUrl = cachedUrl
           console.log('使用缓存播放:', track.title)
-        } else {
-          // Android 原生平台需要先解析实际 URL
-          if (this.isNative() && onlineTrack._platform && onlineTrack._songId) {
-            console.log('Android: 解析实际音频URL...')
-            const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
-            if (actualUrl) {
-              playUrl = actualUrl
-              console.log('实际音频URL:', actualUrl)
-            }
+        } else if (onlineTrack._platform && onlineTrack._songId) {
+          // 解析实际音频 URL
+          console.log('解析实际音频URL...')
+          const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
+          if (actualUrl) {
+            playUrl = actualUrl
+            console.log('实际音频URL:', actualUrl)
+            // 后台缓存
+            this.cacheInBackground(track.id, playUrl, track)
+          } else {
+            console.error('无法获取音频URL')
+            return
           }
-          // 后台缓存（不阻塞播放）
-          this.cacheInBackground(track.id, playUrl, track)
         }
       } catch (e) {
-        console.warn('缓存检查失败:', e)
+        console.warn('获取音频URL失败:', e)
       }
     }
 
-    console.log('开始播放:', playUrl)
+    console.log('开始播放:', playUrl, '使用原生Audio:', this.useNativeAudio)
 
-    // Android 原生平台需要特殊处理
-    const isAndroid = this.isNative() && Capacitor.getPlatform() === 'android'
+    if (this.useNativeAudio) {
+      this.playWithNativeAudio(playUrl, track, store)
+    } else {
+      this.playWithHowler(playUrl, track, store)
+    }
+  }
 
+  /**
+   * 使用原生 HTML5 Audio 播放（安卓）
+   */
+  private playWithNativeAudio(playUrl: string, track: Track | undefined, store: ReturnType<typeof usePlayerStore>) {
+    this.audio = new Audio()
+    this.audio.crossOrigin = 'anonymous'
+    this.audio.preload = 'auto'
+    this.audio.volume = store.volume
+
+    this.audio.oncanplaythrough = () => {
+      console.log('原生Audio: 可以播放')
+      this.audio?.play().catch(e => {
+        console.error('原生Audio: play() 失败', e)
+      })
+    }
+
+    this.audio.onplay = () => {
+      console.log('原生Audio: 播放开始')
+      store.isPlaying = true
+      this.startNativeProgress()
+      if (store.backgroundPlayEnabled) {
+        backgroundMode.enable()
+      }
+    }
+
+    this.audio.onpause = () => {
+      store.isPlaying = false
+    }
+
+    this.audio.onended = () => {
+      if (store.playMode === 'single') {
+        this.audio?.play()
+      } else {
+        store.nextTrack()
+      }
+    }
+
+    this.audio.onloadedmetadata = () => {
+      console.log('原生Audio: 元数据加载完成, 时长:', this.audio?.duration)
+      store.setDuration(this.audio?.duration || 0)
+    }
+
+    this.audio.onerror = (e) => {
+      console.error('原生Audio: 播放失败', e, this.audio?.error)
+      store.isPlaying = false
+      if (track?.source === 'online') {
+        console.log('尝试播放下一首...')
+        setTimeout(() => store.nextTrack(), 2000)
+      }
+    }
+
+    // 设置 src 触发加载
+    this.audio.src = playUrl
+    this.audio.load()
+  }
+
+  /**
+   * 使用 Howler 播放（桌面浏览器）
+   */
+  private playWithHowler(playUrl: string, track: Track | undefined, store: ReturnType<typeof usePlayerStore>) {
     this.howl = new Howl({
       src: [playUrl],
       html5: true,
       volume: store.volume,
       format: ['mp3', 'flac', 'wav', 'ogg', 'm4a'],
-      xhr: isAndroid
-        ? {
-            withCredentials: false
-          }
-        : undefined,
       onplay: () => {
-        console.log('播放开始')
+        console.log('Howler: 播放开始')
         store.isPlaying = true
-        this.startProgress()
+        this.startHowlerProgress()
         if (store.backgroundPlayEnabled) {
           backgroundMode.enable()
         }
@@ -93,26 +152,19 @@ class AudioPlayer {
         }
       },
       onload: () => {
-        console.log('音频加载完成')
+        console.log('Howler: 音频加载完成')
         store.setDuration(this.howl?.duration() || 0)
       },
       onloaderror: (_id, error) => {
-        console.error('音频加载失败:', error, playUrl)
+        console.error('Howler: 音频加载失败:', error, playUrl)
         store.isPlaying = false
         if (track?.source === 'online') {
-          console.log('尝试播放下一首...')
           setTimeout(() => store.nextTrack(), 1000)
         }
       },
       onplayerror: (_id, error) => {
-        console.error('音频播放失败:', error)
+        console.error('Howler: 音频播放失败:', error)
         store.isPlaying = false
-        if (this.howl) {
-          this.howl.once('unlock', () => {
-            console.log('音频上下文已解锁，重试播放')
-            this.howl?.play()
-          })
-        }
       }
     })
     this.howl.play()
@@ -139,23 +191,49 @@ class AudioPlayer {
   }
 
   toggle() {
-    if (!this.howl) return
-    if (this.howl.playing()) {
-      this.howl.pause()
-    } else {
-      this.howl.play()
+    if (this.useNativeAudio && this.audio) {
+      if (this.audio.paused) {
+        this.audio.play()
+      } else {
+        this.audio.pause()
+      }
+    } else if (this.howl) {
+      if (this.howl.playing()) {
+        this.howl.pause()
+      } else {
+        this.howl.play()
+      }
     }
   }
 
   seek(time: number) {
-    this.howl?.seek(time)
+    if (this.useNativeAudio && this.audio) {
+      this.audio.currentTime = time
+    } else {
+      this.howl?.seek(time)
+    }
   }
 
   setVolume(v: number) {
-    this.howl?.volume(v)
+    if (this.useNativeAudio && this.audio) {
+      this.audio.volume = v
+    } else {
+      this.howl?.volume(v)
+    }
   }
 
-  private startProgress() {
+  private startNativeProgress() {
+    const store = usePlayerStore()
+    const update = () => {
+      if (this.audio && !this.audio.paused) {
+        store.setCurrentTime(this.audio.currentTime)
+        this.rafId = requestAnimationFrame(update)
+      }
+    }
+    update()
+  }
+
+  private startHowlerProgress() {
     const store = usePlayerStore()
     const update = () => {
       if (this.howl?.playing()) {
@@ -168,6 +246,13 @@ class AudioPlayer {
 
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId)
+    
+    if (this.audio) {
+      this.audio.pause()
+      this.audio.src = ''
+      this.audio = null
+    }
+    
     this.howl?.unload()
     this.howl = null
     backgroundMode.disable()
@@ -179,7 +264,11 @@ class AudioPlayer {
   setBackgroundPlay(enabled: boolean) {
     const store = usePlayerStore()
     store.backgroundPlayEnabled = enabled
-    if (enabled && this.howl?.playing()) {
+    const isPlaying = this.useNativeAudio 
+      ? (this.audio && !this.audio.paused)
+      : this.howl?.playing()
+    
+    if (enabled && isPlaying) {
       backgroundMode.enable()
     } else {
       backgroundMode.disable()

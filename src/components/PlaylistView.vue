@@ -208,18 +208,12 @@ function isCurrentLyricLine(lineTime: number): boolean {
 </script>
 
 <template>
-  <div class="flex-1 p-4 md:p-6 flex flex-col h-full overflow-hidden">
+  <div class="flex-1 p-6 flex flex-col h-full overflow-hidden">
     <!-- 歌单列表 -->
     <template v-if="!selectedPlaylist">
       <!-- 标题栏 -->
-      <div class="flex items-center justify-between mb-4 flex-shrink-0">
-        <div class="flex items-center gap-2">
-          <svg class="w-5 h-5 md:w-6 md:h-6 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-          </svg>
-          <h2 class="text-lg md:text-2xl font-bold text-white">我的歌单</h2>
-          <span class="text-white/40 text-xs md:text-sm">{{ playlistStore.playlists.length }}个</span>
-        </div>
+      <div class="flex items-center justify-between mb-6 flex-shrink-0">
+        <h2 class="text-2xl font-bold text-white">🎵 我的歌单</h2>
         <div class="flex items-center gap-1.5 md:gap-2">
           <!-- 视图切换 -->
           <div class="flex rounded-lg bg-white/10 p-0.5">

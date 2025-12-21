@@ -68,19 +68,10 @@ export function getMusicUrl(source: MusicSource, id: string, quality: AudioQuali
 }
 
 // 2.1 获取实际的音频文件URL（解析重定向）
-export async function getActualMusicUrl(source: MusicSource, id: string, quality: AudioQuality = '320k'): Promise<string | null> {
-  try {
-    const apiUrl = getMusicUrl(source, id, quality)
-    // 使用 HEAD 请求或 fetch 来获取最终重定向的 URL
-    const res = await fetch(apiUrl, { method: 'HEAD', redirect: 'follow' })
-    if (res.ok) {
-      return res.url // 返回最终重定向后的 URL
-    }
-    return null
-  } catch (e) {
-    console.error('获取实际音频URL失败:', e)
-    return null
-  }
+export async function getActualMusicUrl(source: MusicSource, id: string, quality: AudioQuality = '320k'): Promise<string> {
+  // 直接返回 API URL，让播放器自己处理重定向
+  // 这样可以避免 CORS 问题
+  return getMusicUrl(source, id, quality)
 }
 
 // 3. 获取专辑封面

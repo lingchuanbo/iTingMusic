@@ -168,13 +168,9 @@ onMounted(loadToplists)
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto p-4 md:p-6">
+  <div class="flex-1 overflow-y-auto p-6">
     <!-- 标题 -->
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
-        🏆 排行榜
-      </h2>
-    </div>
+    <h2 class="text-2xl font-bold text-white mb-6">🏆 排行榜</h2>
 
     <!-- 平台选择（横向滚动） -->
     <div class="mb-4 -mx-4 px-4 md:mx-0 md:px-0">
