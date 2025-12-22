@@ -6,6 +6,7 @@ import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { getLyrics, type MusicSource } from '@/services/source/OnlineApiSource'
 import { formatTime } from '@/utils/formatTime'
 import { audioCache } from '@/services/cache/AudioCache'
+import { trackStorage } from '@/services/TrackStorage'
 
 const store = usePlayerStore()
 
@@ -80,7 +81,11 @@ function removeFromList(index: number) {
 }
 
 // 收藏相关
+const favoriteVersion = ref(0) // 用于触发响应式更新
+
 const isFavorite = computed(() => {
+  // 依赖 favoriteVersion 触发响应式更新
+  void favoriteVersion.value
   if (!store.currentTrack) return false
   const ids = JSON.parse(localStorage.getItem('favorites') || '[]')
   return ids.includes(store.currentTrack.id)
@@ -89,13 +94,23 @@ const isFavorite = computed(() => {
 function toggleFavorite() {
   if (!store.currentTrack) return
   const ids = JSON.parse(localStorage.getItem('favorites') || '[]')
+  const favData = JSON.parse(localStorage.getItem('favorites_data') || '[]')
   const idx = ids.indexOf(store.currentTrack.id)
   if (idx >= 0) {
     ids.splice(idx, 1)
+    const dataIdx = favData.findIndex((t: any) => t.id === store.currentTrack!.id)
+    if (dataIdx >= 0) favData.splice(dataIdx, 1)
   } else {
     ids.push(store.currentTrack.id)
+    // 保存完整歌曲数据
+    if (!favData.some((t: any) => t.id === store.currentTrack!.id)) {
+      favData.push(store.currentTrack)
+    }
   }
   localStorage.setItem('favorites', JSON.stringify(ids))
+  localStorage.setItem('favorites_data', JSON.stringify(favData))
+  // 触发响应式更新
+  favoriteVersion.value++
 }
 
 // 下载相关
@@ -132,6 +147,10 @@ const userPlaylists = computed(() => {
 
 function addToPlaylist(playlistId: string) {
   if (!store.currentTrack) return
+  
+  // 保存歌曲数据到 trackStorage
+  trackStorage.saveTrack(store.currentTrack)
+  
   const data = localStorage.getItem('zen_playlists')
   if (!data) return
   
@@ -837,8 +856,14 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             @mouseleave="handleProgressEnd"
           >
             <div class="w-full h-1 bg-white/20 rounded-full relative">
+              <!-- 缓冲进度（灰色） -->
               <div 
-                class="h-full bg-white rounded-full"
+                class="absolute h-full bg-white/30 rounded-full transition-all duration-300"
+                :style="{ width: `${store.buffered}%` }"
+              ></div>
+              <!-- 播放进度（白色） -->
+              <div 
+                class="absolute h-full bg-white rounded-full"
                 :style="{ width: `${store.progress}%` }"
               ></div>
               <!-- 拖动手柄 -->
@@ -847,9 +872,21 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                 :class="isDragging ? 'scale-125' : ''"
                 :style="{ left: `calc(${store.progress}% - 6px)` }"
               ></div>
+              <!-- 缓存完成指示（绿色小点 + 点亮动画） -->
+              <Transition name="cache-dot">
+                <div
+                  v-if="store.isCached"
+                  class="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-green-500 cache-dot-glow"
+                ></div>
+              </Transition>
             </div>
           </div>
-          <span class="text-white/50 text-xs w-10 font-mono">{{ formatTime(store.duration) }}</span>
+          <span class="text-white/50 text-xs w-10 font-mono flex items-center gap-1">
+            <Transition name="cache-dot-small">
+              <span v-if="store.isCached" class="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0 cache-dot-glow-small"></span>
+            </Transition>
+            {{ formatTime(store.duration) }}
+          </span>
         </div>
 
         <!-- 控制按钮 -->
@@ -1213,5 +1250,69 @@ function updateProgress(e: TouchEvent | MouseEvent) {
     transform: scale(1.2);
     opacity: 0;
   }
+}
+
+/* 缓存完成小绿点动画 */
+.cache-dot-glow {
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+}
+
+.cache-dot-glow-small {
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+}
+
+@keyframes cache-dot-pulse {
+  0% {
+    transform: translateY(-50%) scale(0);
+    opacity: 0;
+    box-shadow: 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    transform: translateY(-50%) scale(1.8);
+    box-shadow: 0 0 16px rgba(34, 197, 94, 1);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.8);
+  }
+}
+
+@keyframes cache-dot-pulse-small {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.5);
+    box-shadow: 0 0 10px rgba(34, 197, 94, 1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+  }
+}
+
+.cache-dot-enter-active {
+  animation: cache-dot-pulse 0.5s ease-out forwards;
+}
+.cache-dot-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+.cache-dot-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) scale(0);
+}
+
+.cache-dot-small-enter-active {
+  animation: cache-dot-pulse-small 0.5s ease-out forwards;
+}
+.cache-dot-small-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+.cache-dot-small-leave-to {
+  opacity: 0;
+  transform: scale(0);
 }
 </style>

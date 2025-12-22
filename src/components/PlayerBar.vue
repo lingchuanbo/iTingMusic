@@ -55,81 +55,98 @@ function clearPlaylist() {
 <template>
   <!-- 简洁播放条 - 移动端在底部导航上方 -->
   <div
-    v-if="store.currentTrack"
     class="fixed left-0 right-0 z-50 bg-zinc-900/98 backdrop-blur-xl border-t border-white/10 mobile-player-bar md:bottom-0"
   >
     <!-- 进度条（顶部极细线） -->
     <div class="h-0.5 bg-black/5 dark:bg-white/10 relative">
-      <!-- 缓冲进度（深灰色） -->
-      <div
-        class="absolute h-full bg-zinc-600 transition-all duration-300"
-        :style="{ width: `${store.buffered}%` }"
-      ></div>
-      <!-- 播放进度（紫色） -->
-      <div
-        class="absolute h-full bg-purple-500 transition-all duration-100"
-        :style="{ width: `${store.progress}%` }"
-      ></div>
-      <!-- 缓存完成指示（绿色小点） -->
-      <div
-        v-if="store.isCached"
-        class="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-green-500"
-      ></div>
+      <template v-if="store.currentTrack">
+        <!-- 缓冲进度（深灰色） -->
+        <div
+          class="absolute h-full bg-zinc-600 transition-all duration-300"
+          :style="{ width: `${store.buffered}%` }"
+        ></div>
+        <!-- 播放进度（紫色） -->
+        <div
+          class="absolute h-full bg-purple-500 transition-all duration-100"
+          :style="{ width: `${store.progress}%` }"
+        ></div>
+        <!-- 缓存完成指示（绿色小点 + 点亮动画） -->
+        <Transition name="cache-dot">
+          <div
+            v-if="store.isCached"
+            class="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-green-500 cache-dot-glow"
+          ></div>
+        </Transition>
+      </template>
     </div>
 
     <div class="flex items-center gap-3 px-4 py-2">
-      <!-- 封面（圆形） -->
-      <div
-        @click="store.toggleLyrics()"
-        :class="[
-          'w-10 h-10 rounded-full overflow-hidden flex-shrink-0 cursor-pointer border-2 border-purple-500/30',
-          store.isPlaying ? 'animate-spin-slow' : ''
-        ]"
-      >
-        <img
-          v-if="store.currentTrack.cover"
-          :src="store.currentTrack.cover"
-          :alt="store.currentTrack.title"
-          class="w-full h-full object-cover"
-        />
-        <div v-else class="w-full h-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
-          <span class="text-purple-500 text-sm">🎵</span>
+      <!-- 有歌曲时显示 -->
+      <template v-if="store.currentTrack">
+        <!-- 封面（圆形） -->
+        <div
+          @click="store.toggleLyrics()"
+          :class="[
+            'w-10 h-10 rounded-full overflow-hidden flex-shrink-0 cursor-pointer border-2 border-purple-500/30',
+            store.isPlaying ? 'animate-spin-slow' : ''
+          ]"
+        >
+          <img
+            v-if="store.currentTrack.cover"
+            :src="store.currentTrack.cover"
+            :alt="store.currentTrack.title"
+            class="w-full h-full object-cover"
+          />
+          <div v-else class="w-full h-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
+            <span class="text-purple-500 text-sm">🎵</span>
+          </div>
         </div>
-      </div>
 
-      <!-- 歌曲信息 -->
-      <div class="flex-1 min-w-0" @click="store.toggleLyrics()">
-        <p class="text-white text-sm font-medium truncate">
-          {{ store.currentTrack.title }}
-        </p>
-        <p class="text-white/60 text-xs truncate">{{ store.currentTrack.artist }}</p>
-      </div>
+        <!-- 歌曲信息 -->
+        <div class="flex-1 min-w-0" @click="store.toggleLyrics()">
+          <p class="text-white text-sm font-medium truncate">
+            {{ store.currentTrack.title }}
+          </p>
+          <p class="text-white/60 text-xs truncate">{{ store.currentTrack.artist }}</p>
+        </div>
 
-      <!-- 播放/暂停按钮 -->
-      <button
-        @click="handleToggle"
-        class="w-10 h-10 rounded-full flex items-center justify-center bg-purple-600 text-white shadow-lg shadow-purple-600/30 hover:bg-purple-500 active:scale-95 transition-all"
-      >
-        <svg v-if="store.isPlaying" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
-        </svg>
-        <svg v-else class="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M8 5v14l11-7z"/>
-        </svg>
-      </button>
+        <!-- 播放/暂停按钮 -->
+        <button
+          @click="handleToggle"
+          class="w-10 h-10 rounded-full flex items-center justify-center bg-purple-600 text-white shadow-lg shadow-purple-600/30 hover:bg-purple-500 active:scale-95 transition-all"
+        >
+          <svg v-if="store.isPlaying" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+          </svg>
+          <svg v-else class="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
 
-      <!-- 播放列表按钮 -->
-      <button
-        @click="togglePlaylist"
-        :class="[
-          'w-9 h-9 rounded-full flex items-center justify-center transition-all',
-          showPlaylist ? 'bg-purple-600 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
-        ]"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
-        </svg>
-      </button>
+        <!-- 播放列表按钮 -->
+        <button
+          @click="togglePlaylist"
+          :class="[
+            'w-9 h-9 rounded-full flex items-center justify-center transition-all',
+            showPlaylist ? 'bg-purple-600 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
+          ]"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/>
+          </svg>
+        </button>
+      </template>
+
+      <!-- 空状态 -->
+      <template v-else>
+        <div class="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 border-2 border-white/10 bg-white/5 flex items-center justify-center">
+          <span class="text-white/30 text-sm">🎵</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-white/40 text-sm">暂无播放</p>
+          <p class="text-white/20 text-xs">搜索或选择歌曲开始播放</p>
+        </div>
+      </template>
     </div>
 
     <!-- 播放列表浮窗 -->
@@ -219,8 +236,6 @@ function clearPlaylist() {
     class="fixed inset-0 z-40"
     @click="showPlaylist = false"
   ></div>
-
-  <!-- 无歌曲时不显示 -->
 </template>
 
 <style scoped>
@@ -256,5 +271,39 @@ function clearPlaylist() {
 .playlist-popup-leave-to {
   opacity: 0;
   transform: translateY(20px);
+}
+
+/* 缓存完成小绿点动画 */
+.cache-dot-glow {
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+  animation: cache-dot-pulse 1s ease-out;
+}
+
+@keyframes cache-dot-pulse {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+    box-shadow: 0 0 0 rgba(34, 197, 94, 0);
+  }
+  50% {
+    transform: scale(1.5);
+    box-shadow: 0 0 12px rgba(34, 197, 94, 1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
+  }
+}
+
+.cache-dot-enter-active {
+  animation: cache-dot-pulse 0.5s ease-out;
+}
+.cache-dot-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+.cache-dot-leave-to {
+  opacity: 0;
+  transform: scale(0);
 }
 </style>

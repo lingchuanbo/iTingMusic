@@ -4,18 +4,30 @@ import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { searchSongs, searchResultToTrack, type MusicSource } from '@/services/source/OnlineApiSource'
 import { getAIRecommendations, isAIConfigured, AI_ROLES, getCurrentRole, setCurrentRole, loadPreferences, savePreferences, LANGUAGE_OPTIONS, ERA_OPTIONS, MOOD_OPTIONS, VOCAL_OPTIONS, type AIRole, type AIPreferences } from '@/services/ai/AIService'
+import { trackStorage } from '@/services/TrackStorage'
 
 const playerStore = usePlayerStore()
 const playlistStore = usePlaylistStore()
 
 function getFavorites(): string[] { return JSON.parse(localStorage.getItem('favorites') || '[]') }
 function isFavorite(trackId: string): boolean { return getFavorites().includes(trackId) }
-function toggleFavorite(trackId: string) {
+function toggleFavorite(trackId: string, track?: any) {
   const ids = getFavorites()
+  const favData = JSON.parse(localStorage.getItem('favorites_data') || '[]')
   const idx = ids.indexOf(trackId)
-  if (idx >= 0) ids.splice(idx, 1)
-  else ids.push(trackId)
+  if (idx >= 0) {
+    ids.splice(idx, 1)
+    const dataIdx = favData.findIndex((t: any) => t.id === trackId)
+    if (dataIdx >= 0) favData.splice(dataIdx, 1)
+  } else {
+    ids.push(trackId)
+    // 保存完整歌曲数据
+    if (track && !favData.some((t: any) => t.id === trackId)) {
+      favData.push(track)
+    }
+  }
   localStorage.setItem('favorites', JSON.stringify(ids))
+  localStorage.setItem('favorites_data', JSON.stringify(favData))
 }
 
 const showPlaylistModal = ref(false)
@@ -34,12 +46,14 @@ function _addToUserPlaylist(playlistId: string) {
       if (song.searchResult) {
         const track = searchResultToTrack(song.searchResult)
         playerStore.addTrack(track)
+        trackStorage.saveTrack(track)
         playlistStore.addToPlaylist(playlistId, track.id)
       }
     })
   } else if (selectedSongForPlaylist.value?.searchResult) {
     const track = searchResultToTrack(selectedSongForPlaylist.value.searchResult)
     playerStore.addTrack(track)
+    trackStorage.saveTrack(track)
     playlistStore.addToPlaylist(playlistId, track.id)
   }
   showPlaylistModal.value = false
@@ -751,7 +765,7 @@ function reset() { userInput.value = ''; recommendations.value = []; aiReason.va
                   <span v-if="!song.searchResult" class="px-2 py-1 rounded-lg bg-red-500/10 text-red-400/60 text-xs">未找到</span>
                   <template v-else>
                     <button
-                      @click.stop="toggleFavorite(song.searchResult.id)"
+                      @click.stop="toggleFavorite(song.searchResult.id, searchResultToTrack(song.searchResult))"
                       class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
                     >
                       <svg :class="isFavorite(song.searchResult.id) ? 'text-pink-500' : 'text-white/40'" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">

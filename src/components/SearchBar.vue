@@ -132,15 +132,21 @@ function batchAddToPlaylist() {
 function batchAddToFavorite() {
   const selected = searchResults.value.filter(r => selectedItems.value.has(getResultKey(r)))
   const favorites = JSON.parse(localStorage.getItem('favorites') || '[]')
+  const favData = JSON.parse(localStorage.getItem('favorites_data') || '[]')
   selected.forEach(result => {
     const track = searchResultToTrack(result, quality.value)
     if (!favorites.includes(track.id)) {
       favorites.push(track.id)
+      // 保存完整歌曲数据
+      if (!favData.some((t: any) => t.id === track.id)) {
+        favData.push(track)
+      }
     }
-    // 同时添加到播放列表（这样喜欢的歌才能被找到）
+    // 同时添加到播放列表
     store.addTrack(track)
   })
   localStorage.setItem('favorites', JSON.stringify(favorites))
+  localStorage.setItem('favorites_data', JSON.stringify(favData))
   exitSelectMode()
 }
 

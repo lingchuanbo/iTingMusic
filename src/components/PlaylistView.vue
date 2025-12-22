@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { formatTime } from '@/utils/formatTime'
+import { trackStorage } from '@/services/TrackStorage'
 import type { Playlist } from '@/types'
 
 const playerStore = usePlayerStore()
@@ -94,7 +95,13 @@ const swipeOffset = computed(() => {
 const playlistTracks = computed(() => {
   if (!selectedPlaylist.value) return []
   return selectedPlaylist.value.trackIds
-    .map(id => playerStore.playlist.find(t => t.id === id))
+    .map(id => {
+      // 优先从 trackStorage 获取（独立存储）
+      const stored = trackStorage.getTrack(id)
+      if (stored) return stored
+      // 兼容：从播放列表获取
+      return playerStore.playlist.find(t => t.id === id)
+    })
     .filter(Boolean)
 })
 
@@ -103,6 +110,10 @@ function getPlaylistCover(playlist: Playlist): string | undefined {
   if (playlist.cover) return playlist.cover
   const firstTrackId = playlist.trackIds[0]
   if (firstTrackId) {
+    // 优先从 trackStorage 获取
+    const stored = trackStorage.getTrack(firstTrackId)
+    if (stored?.cover) return stored.cover
+    // 兼容：从播放列表获取
     const track = playerStore.playlist.find(t => t.id === firstTrackId)
     return track?.cover
   }
@@ -146,7 +157,16 @@ function backToList() {
 }
 
 function playTrack(trackId: string) {
-  const idx = playerStore.playlist.findIndex(t => t.id === trackId)
+  // 先检查播放列表中是否存在
+  let idx = playerStore.playlist.findIndex(t => t.id === trackId)
+  if (idx < 0) {
+    // 不在播放列表中，从 trackStorage 获取并添加
+    const track = trackStorage.getTrack(trackId)
+    if (track) {
+      playerStore.addTrack(track)
+      idx = playerStore.playlist.length - 1
+    }
+  }
   if (idx >= 0) {
     playerStore.playTrack(idx)
   }
@@ -157,6 +177,104 @@ function removeFromPlaylist(trackId: string) {
     playlistStore.removeFromPlaylist(selectedPlaylist.value.id, trackId)
   }
 }
+
+// 多选模式
+const isSelectMode = ref(false)
+const selectedTrackIds = ref<Set<string>>(new Set())
+let longPressTimer: number | null = null
+
+// 长按开始
+function handleLongPressStart(trackId: string) {
+  longPressTimer = window.setTimeout(() => {
+    isSelectMode.value = true
+    selectedTrackIds.value.add(trackId)
+  }, 500)
+}
+
+// 长按结束
+function handleLongPressEnd() {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+// 点击处理
+function handleTrackClick(trackId: string) {
+  if (isSelectMode.value) {
+    toggleTrackSelect(trackId)
+  } else {
+    playTrack(trackId)
+  }
+}
+
+// 切换选中
+function toggleTrackSelect(trackId: string) {
+  if (selectedTrackIds.value.has(trackId)) {
+    selectedTrackIds.value.delete(trackId)
+  } else {
+    selectedTrackIds.value.add(trackId)
+  }
+  if (selectedTrackIds.value.size === 0) {
+    isSelectMode.value = false
+  }
+}
+
+// 全选/取消全选
+function toggleSelectAll() {
+  if (selectedTrackIds.value.size === playlistTracks.value.length) {
+    selectedTrackIds.value.clear()
+  } else {
+    playlistTracks.value.forEach(t => {
+      if (t) selectedTrackIds.value.add(t.id)
+    })
+  }
+}
+
+// 退出多选模式
+function exitSelectMode() {
+  isSelectMode.value = false
+  selectedTrackIds.value.clear()
+}
+
+// 批量从歌单移除
+function batchRemoveFromPlaylist() {
+  if (!selectedPlaylist.value || selectedTrackIds.value.size === 0) return
+  selectedTrackIds.value.forEach(trackId => {
+    playlistStore.removeFromPlaylist(selectedPlaylist.value!.id, trackId)
+  })
+  exitSelectMode()
+}
+
+// 批量添加到播放列表
+function batchAddToPlayerList() {
+  selectedTrackIds.value.forEach(trackId => {
+    const track = trackStorage.getTrack(trackId) || playerStore.playlist.find(t => t.id === trackId)
+    if (track && !playerStore.playlist.some(t => t.id === trackId)) {
+      playerStore.addTrack(track)
+    }
+  })
+  exitSelectMode()
+}
+
+// 批量播放
+function batchPlaySelected() {
+  const trackIds = Array.from(selectedTrackIds.value)
+  if (trackIds.length === 0) return
+  trackIds.forEach((trackId, idx) => {
+    const track = trackStorage.getTrack(trackId) || playerStore.playlist.find(t => t.id === trackId)
+    if (track && !playerStore.playlist.some(t => t.id === trackId)) {
+      playerStore.addTrack(track)
+    }
+    if (idx === 0) {
+      const playIdx = playerStore.playlist.findIndex(t => t.id === trackId)
+      if (playIdx >= 0) playerStore.playTrack(playIdx)
+    }
+  })
+  exitSelectMode()
+}
+
+const selectedCount = computed(() => selectedTrackIds.value.size)
 
 function playAll() {
   if (playlistTracks.value.length > 0) {
@@ -425,18 +543,54 @@ function isCurrentLyricLine(lineTime: number): boolean {
         <p class="text-white/30 text-sm mt-2">在播放列表中将歌曲添加到此歌单</p>
       </div>
 
+      <!-- 多选操作栏 -->
+      <div v-if="isSelectMode && detailViewMode === 'list'" class="flex items-center justify-between mb-4 p-3 rounded-xl bg-purple-600/20 border border-purple-500/30">
+        <div class="flex items-center gap-3">
+          <button @click="exitSelectMode" class="text-white/60 hover:text-white">✕</button>
+          <span class="text-white">已选 {{ selectedCount }} 首</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="toggleSelectAll" class="px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20">
+            {{ selectedTrackIds.size === playlistTracks.length ? '取消全选' : '全选' }}
+          </button>
+          <button @click="batchPlaySelected" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-500 disabled:opacity-50">
+            播放
+          </button>
+          <button @click="batchAddToPlayerList" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20 disabled:opacity-50">
+            加入列表
+          </button>
+          <button @click="batchRemoveFromPlaylist" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-sm hover:bg-red-500 disabled:opacity-50">
+            移除
+          </button>
+        </div>
+      </div>
+
       <!-- 列表视图 -->
       <div v-else-if="detailViewMode === 'list'" class="flex-1 overflow-y-auto space-y-2">
+        <div class="text-white/40 text-sm mb-2 text-right">长按多选</div>
         <div
           v-for="(track, index) in playlistTracks"
           :key="track!.id"
-          @click="playTrack(track!.id)"
+          @click="handleTrackClick(track!.id)"
+          @mousedown="handleLongPressStart(track!.id)"
+          @mouseup="handleLongPressEnd"
+          @mouseleave="handleLongPressEnd"
+          @touchstart.passive="handleLongPressStart(track!.id)"
+          @touchend="handleLongPressEnd"
+          @touchcancel="handleLongPressEnd"
           :class="[
             'group flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-colors',
-            playerStore.currentTrack?.id === track!.id ? 'bg-purple-600/30' : 'hover:bg-white/10'
+            selectedTrackIds.has(track!.id) ? 'bg-purple-600/30' : playerStore.currentTrack?.id === track!.id ? 'bg-purple-600/30' : 'hover:bg-white/10'
           ]"
         >
-          <span class="w-6 text-white/30 text-sm text-right">{{ index + 1 }}</span>
+          <!-- 多选框 -->
+          <div v-if="isSelectMode" class="w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+            :class="selectedTrackIds.has(track!.id) ? 'bg-purple-600 border-purple-600' : 'border-white/30'">
+            <svg v-if="selectedTrackIds.has(track!.id)" class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+            </svg>
+          </div>
+          <span v-else class="w-6 text-white/30 text-sm text-right">{{ index + 1 }}</span>
           <div class="w-10 h-10 rounded-lg overflow-hidden bg-white/10 flex-shrink-0">
             <img v-if="track!.cover" :src="track!.cover" class="w-full h-full object-cover" />
             <div v-else class="w-full h-full flex items-center justify-center">🎵</div>
@@ -446,6 +600,7 @@ function isCurrentLyricLine(lineTime: number): boolean {
             <p class="text-white/50 text-xs truncate">{{ track!.artist }}</p>
           </div>
           <button
+            v-if="!isSelectMode"
             @click.stop="removeFromPlaylist(track!.id)"
             class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 transition-all"
             title="从歌单移除"

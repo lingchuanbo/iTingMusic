@@ -36,6 +36,7 @@ const CACHE_DURATION = 2 * 60 * 60 * 1000
 
 // Banner 拖动相关
 const bannerRef = ref<HTMLElement>()
+void bannerRef // 在模板中使用
 const bannerSwipeStartX = ref(0)
 const bannerSwipeCurrentX = ref(0)
 const isBannerSwiping = ref(false)
@@ -107,15 +108,17 @@ function saveCache(data: {
   }
 }
 
-async function loadRecommendData() {
-  const cached = loadCache()
-  if (cached && cached.bannerSongs?.length > 0) {
-    bannerSongs.value = cached.bannerSongs || []
-    hotSongs.value = cached.hotSongs || []
-    newSongs.value = cached.newSongs || []
-    toplists.value = cached.toplists || []
-    loading.value = false
-    return
+async function loadRecommendData(forceRefresh = false) {
+  if (!forceRefresh) {
+    const cached = loadCache()
+    if (cached && cached.bannerSongs?.length > 0) {
+      bannerSongs.value = cached.bannerSongs || []
+      hotSongs.value = cached.hotSongs || []
+      newSongs.value = cached.newSongs || []
+      toplists.value = cached.toplists || []
+      loading.value = false
+      return
+    }
   }
 
   loading.value = true
@@ -248,6 +251,60 @@ function goToToplist() {
   emit('navigate', 'toplist')
 }
 
+// 刷新数据
+const isRefreshing = ref(false)
+async function refreshData() {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  // 清除缓存
+  localStorage.removeItem(CACHE_KEY)
+  localStorage.removeItem(CACHE_TIME_KEY)
+  await loadRecommendData(true)
+  isRefreshing.value = false
+}
+
+// 下拉刷新相关
+const scrollContainer = ref<HTMLElement>()
+const pullStartY = ref(0)
+const pullCurrentY = ref(0)
+const isPulling = ref(false)
+const pullThreshold = 80
+
+const pullDistance = computed(() => {
+  if (!isPulling.value) return 0
+  const dist = pullCurrentY.value - pullStartY.value
+  // 添加阻尼效果
+  return dist > 0 ? Math.min(dist * 0.5, 120) : 0
+})
+
+function handlePullStart(e: TouchEvent) {
+  if (scrollContainer.value && scrollContainer.value.scrollTop <= 0) {
+    isPulling.value = true
+    pullStartY.value = e.touches[0].clientY
+    pullCurrentY.value = e.touches[0].clientY
+  }
+}
+
+function handlePullMove(e: TouchEvent) {
+  if (!isPulling.value) return
+  pullCurrentY.value = e.touches[0].clientY
+  // 如果下拉距离大于0，阻止默认滚动
+  if (pullCurrentY.value - pullStartY.value > 0 && scrollContainer.value?.scrollTop === 0) {
+    e.preventDefault()
+  }
+}
+
+async function handlePullEnd() {
+  if (!isPulling.value) return
+  const dist = pullCurrentY.value - pullStartY.value
+  if (dist > pullThreshold && !isRefreshing.value) {
+    await refreshData()
+  }
+  isPulling.value = false
+  pullStartY.value = 0
+  pullCurrentY.value = 0
+}
+
 onMounted(() => {
   loadRecommendData()
   startBannerTimer()
@@ -259,7 +316,33 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto">
+  <div 
+    ref="scrollContainer"
+    class="flex-1 overflow-y-auto"
+    @touchstart="handlePullStart"
+    @touchmove.passive="handlePullMove"
+    @touchend="handlePullEnd"
+  >
+    <!-- 下拉刷新指示器 -->
+    <div 
+      v-if="pullDistance > 0 || isRefreshing"
+      class="flex items-center justify-center transition-all duration-200"
+      :style="{ height: `${isRefreshing ? 50 : pullDistance}px` }"
+    >
+      <div class="flex items-center gap-2 text-white/60 text-sm">
+        <svg
+          :class="['w-5 h-5 transition-transform', isRefreshing ? 'animate-spin' : pullDistance > pullThreshold ? 'rotate-180' : '']"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path v-if="isRefreshing" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+        </svg>
+        <span>{{ isRefreshing ? '刷新中...' : pullDistance > pullThreshold ? '松开刷新' : '下拉刷新' }}</span>
+      </div>
+    </div>
+
     <!-- 加载状态 -->
     <div v-if="loading" class="flex items-center justify-center h-64">
       <div class="text-center">
@@ -273,7 +356,7 @@ onUnmounted(() => {
       <div class="text-center">
         <p class="text-4xl mb-4">😵</p>
         <p class="text-white/60 mb-2">{{ loadError }}</p>
-        <button @click="loadRecommendData" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm">重试</button>
+        <button @click="() => loadRecommendData()" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm">重试</button>
       </div>
     </div>
 
@@ -367,20 +450,6 @@ onUnmounted(() => {
                 </svg>
               </div>
               <span class="text-white/70 text-[11px] md:text-xs font-medium group-hover:text-white transition-colors whitespace-nowrap">排行榜</span>
-            </div>
-          </div>
-        </button>
-
-        <button @click="playAllHot" class="quick-entry group flex-shrink-0 w-[72px] md:w-auto">
-          <div class="relative p-3 md:p-4 rounded-2xl bg-white/[0.08] backdrop-blur-sm border border-white/[0.08] hover:bg-white/[0.12] hover:border-white/[0.15] transition-all duration-300">
-            <div class="absolute inset-0 rounded-2xl bg-gradient-to-br from-purple-500/20 via-transparent to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div class="relative flex flex-col items-center gap-2.5">
-              <div class="w-11 h-11 md:w-12 md:h-12 rounded-xl bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30 group-hover:shadow-purple-500/50 group-hover:scale-110 group-active:scale-95 transition-all duration-300">
-                <svg class="w-5 h-5 md:w-6 md:h-6 text-white drop-shadow" viewBox="0 0 24 24" fill="currentColor">
-                  <path fill-rule="evenodd" d="M12.963 2.286a.75.75 0 00-1.071-.136 9.742 9.742 0 00-3.539 6.177A7.547 7.547 0 016.648 6.61a.75.75 0 00-1.152.082A9 9 0 1015.68 4.534a7.46 7.46 0 01-2.717-2.248zM15.75 14.25a3.75 3.75 0 11-7.313-1.172c.628.465 1.35.81 2.133 1a5.99 5.99 0 011.925-3.545 3.75 3.75 0 013.255 3.717z" clip-rule="evenodd"/>
-                </svg>
-              </div>
-              <span class="text-white/70 text-[11px] md:text-xs font-medium group-hover:text-white transition-colors whitespace-nowrap">热歌速递</span>
             </div>
           </div>
         </button>
