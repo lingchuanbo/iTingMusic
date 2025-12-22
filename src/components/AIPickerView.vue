@@ -9,30 +9,76 @@ import { trackStorage } from '@/services/TrackStorage'
 const playerStore = usePlayerStore()
 const playlistStore = usePlaylistStore()
 
-function getFavorites(): string[] { return JSON.parse(localStorage.getItem('favorites') || '[]') }
-function isFavorite(trackId: string): boolean { return getFavorites().includes(trackId) }
-function toggleFavorite(trackId: string, track?: any) {
-  const ids = getFavorites()
-  const favData = JSON.parse(localStorage.getItem('favorites_data') || '[]')
-  const idx = ids.indexOf(trackId)
-  if (idx >= 0) {
-    ids.splice(idx, 1)
-    const dataIdx = favData.findIndex((t: any) => t.id === trackId)
-    if (dataIdx >= 0) favData.splice(dataIdx, 1)
-  } else {
-    ids.push(trackId)
-    // 保存完整歌曲数据
-    if (track && !favData.some((t: any) => t.id === trackId)) {
-      favData.push(track)
-    }
-  }
-  localStorage.setItem('favorites', JSON.stringify(ids))
-  localStorage.setItem('favorites_data', JSON.stringify(favData))
-}
-
 const showPlaylistModal = ref(false)
 const selectedSongForPlaylist = ref<any>(null)
 const isAddAllMode = ref(false)
+
+// 打开歌单选择弹窗
+function openPlaylistModal() {
+  isAddAllMode.value = true
+  showPlaylistModal.value = true
+}
+
+// 添加选中的歌曲到指定歌单
+async function addToUserPlaylist(playlistId: string) {
+  const selectedSongs = recommendations.value.filter(s => s.selected !== false)
+  if (selectedSongs.length === 0) {
+    showPlaylistModal.value = false
+    return
+  }
+  
+  // 获取歌单名称
+  const playlist = playlistStore.playlists.find(p => p.id === playlistId)
+  const playlistName = playlist?.name || '歌单'
+  
+  showPlaylistModal.value = false
+  searching.value = true
+  thinkingPhase.value = 'adding'
+  addingProgress.value = { current: 0, total: selectedSongs.length, currentSong: '', addedCount: 0 }
+  
+  const sources: MusicSource[] = ['netease', 'kuwo', 'kugou']
+  
+  for (let i = 0; i < selectedSongs.length; i++) {
+    const song = selectedSongs[i]
+    addingProgress.value.current = i + 1
+    addingProgress.value.currentSong = `${song.title} - ${song.artist}`
+    
+    // 如果还没搜索过，先搜索
+    if (!song.searchResult) {
+      for (const source of sources) {
+        try {
+          const results = await searchSongs(source, `${song.title} ${song.artist}`, 5)
+          const match = results.find(r => r.name.toLowerCase().includes(song.title.toLowerCase()) || song.title.toLowerCase().includes(r.name.toLowerCase())) || results[0]
+          if (match) { 
+            song.searchResult = match
+            break 
+          }
+        } catch { continue }
+      }
+    }
+    
+    // 添加到歌单
+    if (song.searchResult) {
+      const track = searchResultToTrack(song.searchResult)
+      playerStore.addTrack(track)
+      trackStorage.saveTrack(track)
+      playlistStore.addToPlaylist(playlistId, track.id)
+      addingProgress.value.addedCount++
+    }
+  }
+  
+  // 显示提示
+  const addedCount = addingProgress.value.addedCount
+  if (addedCount > 0) {
+    showToast(`📁 已添加 ${addedCount} 首歌曲到「${playlistName}」`)
+  } else {
+    showToast('未能找到可添加的歌曲', 'error')
+  }
+  
+  // 返回到推荐确认状态
+  searching.value = false
+  thinkingPhase.value = 'confirming'
+}
 
 function _openPlaylistModal(song: any, addAll = false) {
   selectedSongForPlaylist.value = song
@@ -61,6 +107,13 @@ function _addToUserPlaylist(playlistId: string) {
 // 保留引用避免编译警告
 void _openPlaylistModal
 void _addToUserPlaylist
+
+// Toast 提示
+const toast = ref({ show: false, message: '', type: 'success' as 'success' | 'error' })
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { show: true, message, type }
+  setTimeout(() => { toast.value.show = false }, 3000)
+}
 
 const currentRole = ref<AIRole>(getCurrentRole())
 const showRoleSelector = ref(false)
@@ -115,12 +168,82 @@ function removeDislikedArtist(artist: string) {
 
 const userInput = ref('')
 const loading = ref(false)
+const searching = ref(false)
 const error = ref('')
 const aiReason = ref('')
 const thinkingText = ref('')
-const thinkingPhase = ref<'thinking' | 'searching' | 'done'>('thinking')
-const recommendations = ref<{ title: string; artist: string; searchResult?: any }[]>([])
-const searchProgress = ref({ current: 0, total: 0, currentSong: '' })
+const thinkingPhase = ref<'thinking' | 'confirming' | 'adding' | 'done'>('thinking')
+const recommendations = ref<{ title: string; artist: string; category?: string; comment?: string; searchResult?: any; selected?: boolean }[]>([])
+const addingProgress = ref({ current: 0, total: 0, currentSong: '', addedCount: 0 })
+
+// 选中的歌曲数量
+const selectedCount = computed(() => recommendations.value.filter(s => s.selected !== false).length)
+
+// 按分类分组的歌曲
+const groupedRecommendations = computed(() => {
+  const groups: { category: string; songs: typeof recommendations.value }[] = []
+  const categoryMap = new Map<string, typeof recommendations.value>()
+  
+  recommendations.value.forEach((song, index) => {
+    const category = song.category || '🎵 推荐歌曲'
+    if (!categoryMap.has(category)) {
+      categoryMap.set(category, [])
+    }
+    categoryMap.get(category)!.push({ ...song, _index: index } as any)
+  })
+  
+  categoryMap.forEach((songs, category) => {
+    groups.push({ category, songs })
+  })
+  
+  return groups
+})
+
+// 切换歌曲选中状态
+function toggleSongSelection(index: number) {
+  const song = recommendations.value[index]
+  song.selected = song.selected === false ? true : false
+}
+
+// 全选/取消全选
+function toggleSelectAll() {
+  const allSelected = selectedCount.value === recommendations.value.length
+  recommendations.value.forEach(s => (s.selected = !allSelected))
+}
+
+// 解析思考内容，提取歌曲和理由
+const parsedThinking = computed(() => {
+  const text = thinkingText.value
+  if (!text) return { songs: [], reason: '' }
+  
+  const result: { songs: { title: string; artist: string }[]; reason: string } = {
+    songs: [],
+    reason: ''
+  }
+  
+  // 尝试提取 reason
+  const reasonMatch = text.match(/"reason"\s*:\s*"([^"]*)"/)
+  if (reasonMatch) {
+    result.reason = reasonMatch[1]
+  }
+  
+  // 尝试提取 songs 数组中的歌曲
+  const songMatches = text.matchAll(/"title"\s*:\s*"([^"]*)"\s*,\s*"artist"\s*:\s*"([^"]*)"/g)
+  for (const match of songMatches) {
+    result.songs.push({ title: match[1], artist: match[2] })
+  }
+  
+  // 如果没有匹配到结构化数据，尝试从纯文本中提取
+  if (result.songs.length === 0 && !result.reason) {
+    // 检查是否有类似 "1. 歌名 - 歌手" 的格式
+    const lineMatches = text.matchAll(/\d+\.\s*[《"]?([^》"—\-]+)[》"]?\s*[-—]\s*([^\n,，]+)/g)
+    for (const match of lineMatches) {
+      result.songs.push({ title: match[1].trim(), artist: match[2].trim() })
+    }
+  }
+  
+  return result
+})
 
 const historyKey = 'ai_picker_history'
 const searchHistory = ref<string[]>(JSON.parse(localStorage.getItem(historyKey) || '[]'))
@@ -202,59 +325,119 @@ async function getRecommendations() {
   thinkingText.value = ''
   thinkingPhase.value = 'thinking'
   recommendations.value = []
-  searchProgress.value = { current: 0, total: 0, currentSong: '' }
+  addingProgress.value = { current: 0, total: 0, currentSong: '', addedCount: 0 }
   try {
     const result = await getAIRecommendations(userInput.value, { onThinking: (text) => { thinkingText.value = text } }, currentRole.value)
     if (!result || result.songs.length === 0) { error.value = 'AI 没有返回推荐结果，请换个描述试试'; loading.value = false; return }
     aiReason.value = result.reason
-    recommendations.value = result.songs.map(s => ({ ...s }))
-    thinkingPhase.value = 'searching'
-    searchProgress.value.total = result.songs.length
-    const sources: MusicSource[] = ['netease', 'kuwo', 'kugou']
-    for (let i = 0; i < recommendations.value.length; i++) {
-      const song = recommendations.value[i]
-      searchProgress.value.current = i + 1
-      searchProgress.value.currentSong = `${song.title} - ${song.artist}`
-      for (const source of sources) {
-        try {
-          const results = await searchSongs(source, `${song.title} ${song.artist}`, 5)
-          const match = results.find(r => r.name.toLowerCase().includes(song.title.toLowerCase()) || song.title.toLowerCase().includes(r.name.toLowerCase())) || results[0]
-          if (match) { song.searchResult = match; break }
-        } catch { continue }
-      }
-    }
-    thinkingPhase.value = 'done'
-  } catch (e: any) { error.value = e.message || '获取推荐失败' }
+    // 默认全部选中
+    recommendations.value = result.songs.map(s => ({ ...s, selected: true }))
+    // 进入确认阶段，等待用户选择
+    thinkingPhase.value = 'confirming'
+  } catch (e: any) { 
+    error.value = e.message || '获取推荐失败'
+    thinkingPhase.value = 'thinking'
+  }
   finally { loading.value = false }
 }
 
+// 用户确认后开始添加歌曲到播放列表
+async function startSearching() {
+  // 只处理选中的歌曲
+  const selectedSongs = recommendations.value.filter(s => s.selected !== false)
+  if (selectedSongs.length === 0) { 
+    error.value = '请至少选择一首歌曲'
+    return 
+  }
+  
+  searching.value = true
+  thinkingPhase.value = 'adding'
+  addingProgress.value = { current: 0, total: selectedSongs.length, currentSong: '', addedCount: 0 }
+  
+  const sources: MusicSource[] = ['netease', 'kuwo', 'kugou']
+  let firstTrackIndex = -1
+  
+  for (let i = 0; i < selectedSongs.length; i++) {
+    const song = selectedSongs[i]
+    addingProgress.value.current = i + 1
+    addingProgress.value.currentSong = `${song.title} - ${song.artist}`
+    
+    // 搜索歌曲
+    for (const source of sources) {
+      try {
+        const results = await searchSongs(source, `${song.title} ${song.artist}`, 5)
+        const match = results.find(r => r.name.toLowerCase().includes(song.title.toLowerCase()) || song.title.toLowerCase().includes(r.name.toLowerCase())) || results[0]
+        if (match) { 
+          song.searchResult = match
+          // 找到后立即添加到播放列表
+          const track = searchResultToTrack(match)
+          playerStore.addTrack(track)
+          addingProgress.value.addedCount++
+          // 记录第一首歌的位置
+          if (firstTrackIndex === -1) {
+            firstTrackIndex = playerStore.playlist.length - 1
+          }
+          break 
+        }
+      } catch { continue }
+    }
+  }
+  
+  // 开始播放第一首添加的歌曲
+  if (firstTrackIndex !== -1) {
+    playerStore.playTrack(firstTrackIndex)
+  }
+  
+  // 显示提示
+  const addedCount = addingProgress.value.addedCount
+  if (addedCount > 0) {
+    showToast(`🎵 已添加 ${addedCount} 首歌曲到播放列表`)
+  } else {
+    showToast('未能找到可播放的歌曲', 'error')
+  }
+  
+  // 返回到推荐确认状态
+  searching.value = false
+  thinkingPhase.value = 'confirming'
+}
+
+// 换一批推荐
+function refreshRecommendations() {
+  if (userInput.value.trim()) {
+    getRecommendations()
+  }
+}
+
 function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommendations() }
-function playSong(song: any) {
-  if (!song.searchResult) return
-  const track = searchResultToTrack(song.searchResult)
-  playerStore.addTrack(track)
-  playerStore.playTrack(playerStore.playlist.length - 1)
-}
-function addToPlaylist(song: any) {
-  if (!song.searchResult) return
-  playerStore.addTrack(searchResultToTrack(song.searchResult))
-}
-function addAll() { recommendations.value.forEach(song => { if (song.searchResult) playerStore.addTrack(searchResultToTrack(song.searchResult)) }) }
-function playAll() {
-  const validSongs = recommendations.value.filter(s => s.searchResult)
-  if (validSongs.length === 0) return
-  validSongs.forEach((song, idx) => {
-    playerStore.addTrack(searchResultToTrack(song.searchResult))
-    if (idx === 0) playerStore.playTrack(playerStore.playlist.length - 1)
-  })
-}
-function _refreshRecommendations() { if (userInput.value.trim()) getRecommendations() }
-void _refreshRecommendations
-function reset() { userInput.value = ''; recommendations.value = []; aiReason.value = ''; thinkingText.value = ''; error.value = '' }
 </script>
 
 <template>
   <div class="flex-1 overflow-y-auto bg-gradient-to-b from-slate-900 via-slate-900 to-black">
+    <!-- Toast 提示 -->
+    <Transition name="toast">
+      <div v-if="toast.show" class="fixed top-20 left-1/2 -translate-x-1/2 z-50">
+        <div :class="[
+          'px-5 py-3 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-3 border',
+          toast.type === 'success' 
+            ? 'bg-green-500/20 border-green-500/30 text-green-200' 
+            : 'bg-red-500/20 border-red-500/30 text-red-200'
+        ]">
+          <div :class="[
+            'w-8 h-8 rounded-xl flex items-center justify-center',
+            toast.type === 'success' ? 'bg-green-500/30' : 'bg-red-500/30'
+          ]">
+            <svg v-if="toast.type === 'success'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </div>
+          <span class="text-sm font-medium">{{ toast.message }}</span>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 顶部装饰背景 -->
     <div class="relative">
       <div class="absolute inset-0 overflow-hidden">
@@ -642,153 +825,324 @@ function reset() { userInput.value = ''; recommendations.value = []; aiReason.va
                   </div>
                   <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-purple-500 rounded-full animate-ping"></div>
                 </div>
-                <div>
+                <div class="flex-1">
                   <span class="text-white font-medium">{{ currentRole.name }}</span>
-                  <span class="text-purple-300 text-sm ml-2">正在思考...</span>
+                  <span class="text-purple-300 text-sm ml-2">正在为你挑选歌曲...</span>
+                </div>
+                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/20 text-purple-300 text-xs">
+                  <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                  思考中
                 </div>
               </div>
-              <div class="relative pl-4 border-l-2 border-purple-500/30">
-                <div class="text-white/70 text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
-                  {{ thinkingText || '分析你的需求中...' }}
-                  <span class="inline-block w-2 h-4 bg-purple-400 ml-1 animate-pulse"></span>
+              
+              <!-- 思考内容展示 -->
+              <div class="relative">
+                <!-- 解析并展示思考内容 -->
+                <div v-if="parsedThinking.reason || parsedThinking.songs.length > 0" class="space-y-4">
+                  <!-- 推荐理由 -->
+                  <div v-if="parsedThinking.reason" class="p-3 rounded-xl bg-white/5 border border-white/10">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-purple-400 text-xs font-medium">💭 推荐理由</span>
+                    </div>
+                    <p class="text-white/80 text-sm leading-relaxed">{{ parsedThinking.reason }}</p>
+                  </div>
+                  
+                  <!-- 已识别的歌曲 -->
+                  <div v-if="parsedThinking.songs.length > 0">
+                    <div class="flex items-center gap-2 mb-2">
+                      <span class="text-green-400 text-xs font-medium">🎵 正在推荐</span>
+                      <span class="text-white/30 text-xs">{{ parsedThinking.songs.length }} 首</span>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div 
+                        v-for="(song, idx) in parsedThinking.songs" 
+                        :key="idx"
+                        class="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/5"
+                      >
+                        <span class="w-5 h-5 rounded bg-purple-500/20 text-purple-300 text-xs flex items-center justify-center">{{ idx + 1 }}</span>
+                        <div class="flex-1 min-w-0">
+                          <p class="text-white/90 text-xs font-medium truncate">{{ song.title }}</p>
+                          <p class="text-white/40 text-xs truncate">{{ song.artist }}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 原始文本（当无法解析时显示） -->
+                <div v-else class="pl-4 border-l-2 border-purple-500/30">
+                  <div class="text-white/70 text-sm whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
+                    {{ thinkingText || '分析你的需求中...' }}
+                    <span class="inline-block w-2 h-4 bg-purple-400 ml-1 animate-pulse"></span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </Transition>
 
-        <!-- 搜索进度 -->
+        <!-- 添加到播放列表进度 -->
         <Transition name="fade">
-          <div v-if="loading && thinkingPhase === 'searching'" class="mb-5">
+          <div v-if="searching && thinkingPhase === 'adding'" class="mb-5">
             <div class="p-5 rounded-2xl bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 backdrop-blur-xl">
               <div class="flex items-center gap-3 mb-4">
                 <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
-                  <svg class="w-5 h-5 text-white animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <svg class="w-5 h-5 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                   </svg>
                 </div>
-                <div>
-                  <span class="text-white font-medium">搜索歌曲</span>
-                  <span class="text-green-300 text-sm ml-2">{{ searchProgress.current }}/{{ searchProgress.total }}</span>
+                <div class="flex-1">
+                  <span class="text-white font-medium">正在添加到播放列表</span>
+                  <span class="text-green-300 text-sm ml-2">{{ addingProgress.current }}/{{ addingProgress.total }}</span>
+                </div>
+                <div v-if="addingProgress.addedCount > 0" class="px-2 py-1 rounded-full bg-green-500/20 text-green-300 text-xs">
+                  已添加 {{ addingProgress.addedCount }} 首
                 </div>
               </div>
-              <p class="text-white/50 text-sm mb-3 truncate flex items-center gap-2">
-                <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                </svg>
-                {{ searchProgress.currentSong }}
-              </p>
-              <div class="h-2 bg-white/10 rounded-full overflow-hidden">
+              <div class="flex items-center gap-3 p-3 rounded-xl bg-white/5">
+                <div class="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-purple-300 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
+                  </svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-white text-sm font-medium truncate">{{ addingProgress.currentSong }}</p>
+                </div>
+              </div>
+              <div class="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden">
                 <div
-                  class="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-500 ease-out rounded-full"
-                  :style="{ width: `${(searchProgress.current / searchProgress.total) * 100}%` }"
+                  class="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-300 ease-out rounded-full"
+                  :style="{ width: `${(addingProgress.current / addingProgress.total) * 100}%` }"
                 ></div>
               </div>
             </div>
           </div>
         </Transition>
 
-        <!-- 推荐结果 -->
+        <!-- AI 推荐确认阶段 -->
         <Transition name="fade">
-          <div v-if="!loading && recommendations.length > 0">
-            <!-- AI 推荐理由 -->
-            <div v-if="aiReason" class="mb-4 p-4 rounded-2xl bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20">
-              <div class="flex items-start gap-3">
-                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-sm flex-shrink-0">
-                  {{ currentRole.avatar }}
-                </div>
-                <p class="text-purple-200/90 text-sm leading-relaxed">{{ aiReason }}</p>
-              </div>
-            </div>
-
-            <!-- 操作栏 -->
-            <div class="flex items-center justify-between mb-4 p-3 rounded-xl bg-white/5 border border-white/10">
-              <div class="flex items-center gap-2">
-                <div class="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
-                  <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
-                  </svg>
-                </div>
-                <span class="text-white/60 text-sm">
-                  找到 <span class="text-green-400 font-medium">{{ recommendations.filter(s => s.searchResult).length }}</span> / {{ recommendations.length }} 首
-                </span>
-              </div>
-              <div class="flex gap-2">
-                <button @click="playAll" class="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-medium transition-all shadow-lg shadow-purple-500/20 flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
-                  </svg>
-                  播放全部
-                </button>
-                <button @click="addAll" class="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-all flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                  </svg>
-                  全部添加
-                </button>
-                <button @click="reset" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-medium transition-all flex items-center gap-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                  </svg>
-                  重选
-                </button>
-              </div>
-            </div>
-
-            <!-- 歌曲列表 -->
-            <div class="space-y-1">
-              <div
-                v-for="(song, index) in recommendations"
-                :key="`${song.title}-${song.artist}`"
-                :class="[
-                  'group relative flex items-center gap-4 p-3 rounded-xl transition-all duration-200',
-                  song.searchResult 
-                    ? 'hover:bg-white/10 cursor-pointer' 
-                    : 'opacity-40 cursor-not-allowed'
-                ]"
-                @click="song.searchResult && playSong(song)"
-              >
-                <!-- 序号 -->
-                <div class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/30 text-sm font-medium group-hover:bg-purple-500/20 group-hover:text-purple-300 transition-all">
-                  {{ index + 1 }}
+          <div v-if="!loading && !searching && thinkingPhase === 'confirming' && recommendations.length > 0" class="mb-5">
+            <!-- AI 主持人卡片 -->
+            <div class="mb-4 p-4 rounded-2xl bg-gradient-to-br from-purple-600/20 via-pink-500/10 to-purple-600/20 border border-purple-500/30 backdrop-blur-xl relative overflow-hidden">
+              <!-- 装饰背景 -->
+              <div class="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl"></div>
+              <div class="absolute bottom-0 left-0 w-24 h-24 bg-pink-500/10 rounded-full blur-2xl"></div>
+              
+              <div class="relative flex items-start gap-4">
+                <!-- 头像 -->
+                <div class="relative flex-shrink-0">
+                  <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 flex items-center justify-center text-2xl shadow-lg shadow-purple-500/30">
+                    {{ currentRole.avatar }}
+                  </div>
+                  <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-slate-900 flex items-center justify-center">
+                    <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                  </div>
                 </div>
                 
-                <!-- 歌曲信息 -->
+                <!-- 内容 -->
                 <div class="flex-1 min-w-0">
-                  <p class="text-white text-sm font-medium truncate group-hover:text-purple-200 transition-colors">{{ song.title }}</p>
-                  <p class="text-white/40 text-xs truncate">{{ song.artist }}</p>
+                  <div class="flex items-center gap-2 mb-2">
+                    <span class="text-white font-semibold text-lg">{{ currentRole.name }}</span>
+                    <span class="px-2.5 py-1 rounded-full bg-gradient-to-r from-green-500/20 to-emerald-500/20 text-green-300 text-xs font-medium border border-green-500/30">
+                      🎵 推荐完成
+                    </span>
+                  </div>
+                  <!-- 开场白 -->
+                  <p v-if="aiReason" class="text-white/80 text-sm leading-relaxed">{{ aiReason }}</p>
+                  <p v-else class="text-white/60 text-sm leading-relaxed italic">为你精心挑选了 {{ recommendations.length }} 首歌曲，希望你喜欢~</p>
                 </div>
-                
-                <!-- 状态/操作 -->
+              </div>
+            </div>
+            
+            <!-- 歌曲列表卡片 -->
+            <div class="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-xl overflow-hidden">
+              <!-- 标题栏 -->
+              <div class="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/5">
                 <div class="flex items-center gap-2">
-                  <span v-if="!song.searchResult" class="px-2 py-1 rounded-lg bg-red-500/10 text-red-400/60 text-xs">未找到</span>
-                  <template v-else>
-                    <button
-                      @click.stop="toggleFavorite(song.searchResult.id, searchResultToTrack(song.searchResult))"
-                      class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                  <span class="text-lg">🎧</span>
+                  <span class="text-white font-medium">专属歌单</span>
+                  <span class="text-white/40 text-sm">{{ recommendations.length }} 首</span>
+                </div>
+                <button 
+                  @click="toggleSelectAll"
+                  class="text-xs text-purple-300 hover:text-purple-200 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/5"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                  </svg>
+                  {{ selectedCount === recommendations.length ? '取消全选' : '全选' }}
+                </button>
+              </div>
+              
+              <!-- 分类歌曲列表 -->
+              <div class="max-h-96 overflow-y-auto">
+                <div v-for="(group, groupIdx) in groupedRecommendations" :key="group.category" class="border-b border-white/5 last:border-b-0">
+                  <!-- 分类标题 -->
+                  <div class="sticky top-0 z-10 px-4 py-2.5 bg-gradient-to-r from-purple-900/50 to-pink-900/30 backdrop-blur-sm border-b border-white/5">
+                    <span class="text-white/90 text-sm font-medium">{{ group.category || `🎵 推荐歌曲 ${groupIdx + 1}` }}</span>
+                  </div>
+                  
+                  <!-- 歌曲列表 -->
+                  <div class="divide-y divide-white/5">
+                    <div 
+                      v-for="song in group.songs" 
+                      :key="(song as any)._index"
+                      @click="toggleSongSelection((song as any)._index)"
+                      :class="[
+                        'flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-200',
+                        song.selected !== false 
+                          ? 'bg-purple-500/10 hover:bg-purple-500/15' 
+                          : 'hover:bg-white/5 opacity-50'
+                      ]"
                     >
-                      <svg :class="isFavorite(song.searchResult.id) ? 'text-pink-500' : 'text-white/40'" class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"/>
+                      <!-- 勾选框 -->
+                      <div :class="[
+                        'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all duration-200',
+                        song.selected !== false 
+                          ? 'bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg shadow-purple-500/30' 
+                          : 'bg-white/10 border border-white/20'
+                      ]">
+                        <svg v-if="song.selected !== false" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                        </svg>
+                      </div>
+                      
+                      <!-- 歌曲信息 -->
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-0.5">
+                          <p :class="['text-sm font-medium truncate', song.selected !== false ? 'text-white' : 'text-white/60']">
+                            {{ song.title }}
+                          </p>
+                          <span class="text-white/20 text-xs">•</span>
+                          <p class="text-white/40 text-sm truncate flex-shrink-0">{{ song.artist }}</p>
+                        </div>
+                        <p v-if="song.comment" :class="['text-xs line-clamp-1', song.selected !== false ? 'text-purple-300/70' : 'text-white/30']">
+                          💡 {{ song.comment }}
+                        </p>
+                      </div>
+                      
+                      <!-- 音乐图标 -->
+                      <div v-if="song.selected !== false" class="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-4 h-4 text-purple-300" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 底部操作栏 -->
+              <div class="px-4 py-4 border-t border-white/10 bg-gradient-to-r from-purple-900/30 to-pink-900/20">
+                <div class="flex items-center gap-2">
+                  <button 
+                    @click="startSearching"
+                    :disabled="selectedCount === 0"
+                    :class="[
+                      'flex-1 h-11 rounded-xl text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2',
+                      selectedCount > 0 
+                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-[1.02]' 
+                        : 'bg-white/10 cursor-not-allowed opacity-50'
+                    ]"
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
+                    </svg>
+                    听听看
+                  </button>
+                  <button 
+                    @click="openPlaylistModal"
+                    :disabled="selectedCount === 0"
+                    :class="[
+                      'h-11 px-4 rounded-xl text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                      selectedCount > 0 
+                        ? 'bg-white/10 hover:bg-white/20 text-white hover:scale-105' 
+                        : 'bg-white/5 cursor-not-allowed opacity-50 text-white/50'
+                    ]"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    加入歌单
+                  </button>
+                  <button 
+                    @click="refreshRecommendations"
+                    class="h-11 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 hover:scale-105"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    换一批
+                  </button>
+                </div>
+                <p class="text-center text-white/30 text-xs mt-2">已选 {{ selectedCount }} 首</p>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- 歌单选择弹窗 -->
+        <Transition name="fade">
+          <div v-if="showPlaylistModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="showPlaylistModal = false">
+            <div class="w-full max-w-sm bg-slate-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+              <!-- 弹窗标题 -->
+              <div class="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-purple-900/30 to-pink-900/20">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                       </svg>
-                    </button>
-                    <button
-                      @click.stop="addToPlaylist(song)"
-                      class="w-8 h-8 rounded-lg bg-white/5 hover:bg-purple-500/20 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <svg class="w-4 h-4 text-white/60 hover:text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </div>
+                    <div>
+                      <h3 class="text-white font-semibold">添加到歌单</h3>
+                      <p class="text-white/50 text-xs">{{ selectedCount }} 首歌曲</p>
+                    </div>
+                  </div>
+                  <button @click="showPlaylistModal = false" class="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              
+              <!-- 歌单列表 -->
+              <div class="max-h-64 overflow-y-auto">
+                <div v-if="playlistStore.playlists.length === 0" class="px-5 py-8 text-center">
+                  <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-white/5 flex items-center justify-center">
+                    <svg class="w-8 h-8 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                    </svg>
+                  </div>
+                  <p class="text-white/50 text-sm">还没有歌单</p>
+                  <p class="text-white/30 text-xs mt-1">去「我的」页面创建一个吧</p>
+                </div>
+                <div v-else class="divide-y divide-white/5">
+                  <button
+                    v-for="playlist in playlistStore.playlists"
+                    :key="playlist.id"
+                    @click="addToUserPlaylist(playlist.id)"
+                    class="w-full px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left"
+                  >
+                    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center flex-shrink-0">
+                      <svg class="w-6 h-6 text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                       </svg>
-                    </button>
-                    <button
-                      @click.stop="playSong(song)"
-                      class="w-8 h-8 rounded-lg bg-purple-500/20 hover:bg-purple-500/40 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <svg class="w-4 h-4 text-purple-300" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
-                      </svg>
-                    </button>
-                  </template>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-white text-sm font-medium truncate">{{ playlist.name }}</p>
+                      <p class="text-white/40 text-xs">{{ playlist.trackIds.length }} 首歌曲</p>
+                    </div>
+                    <svg class="w-5 h-5 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -825,6 +1179,17 @@ function reset() { userInput.value = ''; recommendations.value = []; aiReason.va
 .fade-leave-to {
   opacity: 0;
   transform: translateY(10px);
+}
+
+/* Toast 动画 */
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -20px);
 }
 
 /* 自定义滚动条 */
