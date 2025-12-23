@@ -51,27 +51,32 @@ export const usePlayerStore = defineStore('player', () => {
     duration.value > 0 ? (currentTime.value / duration.value) * 100 : 0
   )
 
-  // 保存到 localStorage
+  // 保存到 localStorage - 使用防抖减少写入频率
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
   function saveToStorage() {
-    try {
-      // 过滤掉本地文件的 blob URL（无法持久化）
-      const savablePlaylist = playlist.value.map(track => ({
-        ...track,
-        // 本地文件的 blob URL 无法保存，标记一下
-        url: track.url.startsWith('blob:') ? '' : track.url,
-        cover: track.cover?.startsWith('blob:') ? '' : track.cover
-      })).filter(t => t.url) // 只保存有有效 URL 的
+    // 防抖：300ms 内的多次调用只执行最后一次
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      try {
+        // 过滤掉本地文件的 blob URL（无法持久化）
+        const savablePlaylist = playlist.value.map(track => ({
+          ...track,
+          // 本地文件的 blob URL 无法保存，标记一下
+          url: track.url.startsWith('blob:') ? '' : track.url,
+          cover: track.cover?.startsWith('blob:') ? '' : track.cover
+        })).filter(t => t.url) // 只保存有有效 URL 的
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        playlist: savablePlaylist,
-        currentIndex: currentIndex.value,
-        volume: volume.value,
-        playMode: playMode.value,
-        backgroundPlayEnabled: backgroundPlayEnabled.value
-      }))
-    } catch (e) {
-      console.error('保存播放数据失败:', e)
-    }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          playlist: savablePlaylist,
+          currentIndex: currentIndex.value,
+          volume: volume.value,
+          playMode: playMode.value,
+          backgroundPlayEnabled: backgroundPlayEnabled.value
+        }))
+      } catch (e) {
+        console.error('保存播放数据失败:', e)
+      }
+    }, 300)
   }
 
   // 监听变化自动保存

@@ -1,16 +1,57 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
-import type { AudioQuality } from '@/services/source/OnlineApiSource'
+import type { AudioQuality, MusicSource } from '@/services/source/OnlineApiSource'
 import {
   loadAIConfig,
   saveAIConfig,
   getDefaultConfig,
+  resetToBuiltinConfig,
   type AIConfig
 } from '@/services/ai/AIService'
 import { audioCache } from '@/services/cache/AudioCache'
 
 const store = usePlayerStore()
+
+// 音乐源设置
+const MUSIC_SOURCES_KEY = 'enabled_music_sources'
+const allMusicSources: { value: MusicSource; label: string; desc: string }[] = [
+  { value: 'netease', label: '网易云音乐', desc: '资源丰富' },
+  { value: 'qq', label: 'QQ音乐', desc: '版权较全' },
+  { value: 'kuwo', label: '酷我音乐', desc: '老牌平台' },
+  { value: 'kugou', label: '酷狗音乐', desc: '草根音乐' },
+  { value: 'migu', label: '咪咕音乐', desc: '无损资源' }
+]
+
+// 默认启用网易云和QQ音乐
+const defaultEnabledSources: MusicSource[] = ['netease', 'qq']
+
+function loadEnabledSources(): MusicSource[] {
+  try {
+    const data = localStorage.getItem(MUSIC_SOURCES_KEY)
+    if (data) return JSON.parse(data)
+  } catch {}
+  return defaultEnabledSources
+}
+
+function saveEnabledSources(sources: MusicSource[]) {
+  localStorage.setItem(MUSIC_SOURCES_KEY, JSON.stringify(sources))
+}
+
+const enabledSources = ref<MusicSource[]>(loadEnabledSources())
+
+function toggleSource(source: MusicSource) {
+  const idx = enabledSources.value.indexOf(source)
+  if (idx >= 0) {
+    // 至少保留一个源
+    if (enabledSources.value.length > 1) {
+      enabledSources.value.splice(idx, 1)
+    }
+  } else {
+    enabledSources.value.push(source)
+  }
+  saveEnabledSources(enabledSources.value)
+}
 
 // 缓存统计
 const cacheStats = ref({ count: 0, totalSize: 0 })
@@ -137,9 +178,8 @@ function clearWebDAV() {
 }
 
 function clearAIConfig() {
-  localStorage.removeItem('zen_ai_config')
-  aiConfig.value = loadAIConfig()
-  alert('已清除 AI 配置')
+  aiConfig.value = resetToBuiltinConfig()
+  alert('已重置为默认 AI 配置')
 }
 </script>
 
@@ -148,6 +188,29 @@ function clearAIConfig() {
     <h2 class="text-2xl font-bold text-white mb-6">⚙️ 设置</h2>
 
     <div class="max-w-lg space-y-8">
+      <!-- 音乐源设置 -->
+      <section>
+        <h3 class="text-white/80 font-medium mb-3">🎵 音乐源</h3>
+        <p class="text-white/40 text-xs mb-3">选择搜索时使用的音乐平台（至少保留一个）</p>
+        <div class="space-y-2">
+          <button
+            v-for="s in allMusicSources"
+            :key="s.value"
+            @click="toggleSource(s.value)"
+            :class="[
+              'w-full flex items-center justify-between p-3 rounded-lg transition-colors',
+              enabledSources.includes(s.value) ? 'bg-purple-600/50' : 'bg-white/5 hover:bg-white/10'
+            ]"
+          >
+            <div>
+              <p class="text-white">{{ s.label }}</p>
+              <p class="text-white/50 text-sm">{{ s.desc }}</p>
+            </div>
+            <span v-if="enabledSources.includes(s.value)" class="text-green-400">✓</span>
+          </button>
+        </div>
+      </section>
+
       <!-- AI 配置 -->
       <section>
         <h3 class="text-white/80 font-medium mb-3 flex items-center gap-2">
@@ -243,7 +306,8 @@ function clearAIConfig() {
 
           <!-- 提示 -->
           <div class="p-3 rounded-lg bg-white/5 text-white/50 text-xs space-y-1">
-            <p>💡 如何获取 API Key：</p>
+            <p>💡 已内置默认 AI 服务，开箱即用</p>
+            <p>• 如需自定义，选择"自定义"并填写配置</p>
             <p>• OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" class="text-purple-400 hover:underline">platform.openai.com</a></p>
             <p>• DeepSeek: <a href="https://platform.deepseek.com/api_keys" target="_blank" class="text-purple-400 hover:underline">platform.deepseek.com</a></p>
           </div>
@@ -337,14 +401,14 @@ function clearAIConfig() {
             @click="clearAIConfig"
             class="w-full p-3 rounded-lg bg-white/5 hover:bg-white/10 text-left text-white/70"
           >
-            清除 AI 配置
+            重置 AI 配置为默认
           </button>
         </div>
       </section>
 
       <!-- 关于 -->
       <section class="text-white/40 text-sm">
-        <p>Zen Player v0.1.0</p>
+        <p>iTing Music v0.2.0</p>
         <p>Vue 3 + Tailwind CSS + Howler.js</p>
       </section>
     </div>

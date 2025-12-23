@@ -40,6 +40,18 @@ async function nativeFetchText(url: string): Promise<string> {
 export type MusicSource = 'netease' | 'kuwo' | 'kugou' | 'qq' | 'migu'
 export type AudioQuality = '128k' | '320k' | 'flac' | 'flac24bit'
 
+// 获取启用的音乐源
+const MUSIC_SOURCES_KEY = 'enabled_music_sources'
+const defaultEnabledSources: MusicSource[] = ['netease', 'qq']
+
+export function getEnabledSources(): MusicSource[] {
+  try {
+    const data = localStorage.getItem(MUSIC_SOURCES_KEY)
+    if (data) return JSON.parse(data)
+  } catch {}
+  return defaultEnabledSources
+}
+
 // API 响应类型
 export interface ApiResponse<T> {
   code: number
@@ -153,7 +165,11 @@ export async function aggregateSearch(keyword: string): Promise<SearchResult[]> 
       `${API_BASE}/?type=aggregateSearch&keyword=${encodeURIComponent(keyword)}`
     )
     const json: ApiResponse<SearchData> = await res.json()
-    if (json.code === 200) return json.data.results
+    if (json.code === 200) {
+      // 只返回启用的音乐源的结果
+      const enabledSources = getEnabledSources()
+      return json.data.results.filter(r => enabledSources.includes(r.platform))
+    }
     return []
   } catch (e) {
     console.error('聚合搜索失败:', e)

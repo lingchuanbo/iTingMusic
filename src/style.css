@@ -20,6 +20,20 @@ html, body, #app {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 省电优化：减少动画在后台运行 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 页面不可见时暂停所有动画 */
+.page-hidden * {
+  animation-play-state: paused !important;
+}
+
 /* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 6px;
@@ -37,25 +51,33 @@ html, body, #app {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* 旋转动画 */
+/* 旋转动画 - 使用 GPU 加速 */
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 .animate-spin-slow {
   animation: spin-slow 20s linear infinite;
+  will-change: transform;
+  transform: translateZ(0);
 }
 .animate-spin-slow.paused {
   animation-play-state: paused;
 }
 
-/* 玻璃拟态工具类 */
+/* 玻璃拟态工具类 - 使用 GPU 加速 */
 .glass {
   background: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.05);
+  will-change: backdrop-filter;
 }
 
 .glass-hover:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* 图片懒加载占位 */
+img[loading="lazy"] {
+  background: rgba(255, 255, 255, 0.05);
 }

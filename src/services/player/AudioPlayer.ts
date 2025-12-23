@@ -19,6 +19,7 @@ class AudioPlayer {
   private useNativeAudio: boolean = false
   private errorCount: number = 0
   private maxErrors: number = 3
+  private controlCallbackSetup: boolean = false
 
   constructor() {
     // Android 平台强制使用原生 Audio，因为 Howler 在后台会被暂停
@@ -28,6 +29,44 @@ class AudioPlayer {
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this))
     }
+
+    // 设置通知栏控制回调
+    this.setupNotificationControls()
+  }
+
+  /**
+   * 设置通知栏控制回调
+   */
+  private setupNotificationControls() {
+    if (this.controlCallbackSetup) return
+    this.controlCallbackSetup = true
+
+    backgroundMode.setControlCallback((action) => {
+      const store = usePlayerStore()
+      console.log('AudioPlayer 处理通知栏控制:', action)
+      
+      switch (action) {
+        case 'playPause':
+          // 只调用 toggle，它会处理实际的播放/暂停
+          // store.isPlaying 会在 audio 的 onplay/onpause 事件中更新
+          const toggled = this.toggle()
+          if (toggled) {
+            // 预先更新通知栏状态
+            const newState = this.audio ? !this.audio.paused : (this.howl ? this.howl.playing() : false)
+            backgroundMode.updatePlayState(newState)
+          }
+          break
+        case 'next':
+          store.nextTrack()
+          break
+        case 'prev':
+          store.prevTrack()
+          break
+        case 'toggleLyrics':
+          store.toggleLyrics()
+          break
+      }
+    })
   }
 
   /**
@@ -37,7 +76,13 @@ class AudioPlayer {
     const store = usePlayerStore()
     if (document.hidden && store.isPlaying && store.backgroundPlayEnabled) {
       // 页面进入后台，确保后台服务运行
-      backgroundMode.enable(store.currentTrack?.title, store.currentTrack?.artist)
+      backgroundMode.enable({
+        title: store.currentTrack?.title,
+        artist: store.currentTrack?.artist,
+        cover: store.currentTrack?.cover,
+        isPlaying: true,
+        duration: store.duration
+      })
     }
   }
 
@@ -121,7 +166,13 @@ class AudioPlayer {
 
     // 在 Android 上，播放前先启动后台服务
     if (this.useNativeAudio && store.backgroundPlayEnabled) {
-      await backgroundMode.enable(track?.title, track?.artist)
+      await backgroundMode.enable({
+        title: track?.title,
+        artist: track?.artist,
+        cover: track?.cover,
+        isPlaying: true,
+        duration: 0
+      })
     }
 
     console.log('开始播放:', playUrl, '使用原生Audio:', this.useNativeAudio)
@@ -159,36 +210,57 @@ class AudioPlayer {
       this.errorCount = 0 // 播放成功，重置错误计数
       store.isPlaying = true
       this.startNativeProgress()
+      
       if (store.backgroundPlayEnabled) {
-        backgroundMode.enable(currentTrack?.title, currentTrack?.artist)
+        backgroundMode.enable({
+          title: currentTrack?.title,
+          artist: currentTrack?.artist,
+          cover: currentTrack?.cover,
+          isPlaying: true,
+          duration: this.audio?.duration || 0
+        })
+        backgroundMode.updatePlayState(true)
       }
     }
 
     this.audio.onpause = () => {
       console.log('原生Audio: 暂停')
       // 只有在非后台状态下才更新 isPlaying
-      // 后台暂停可能是系统行为，不应该停止播放状态
       if (!document.hidden) {
         store.isPlaying = false
       }
+      // 更新通知栏状态
+      backgroundMode.updatePlayState(false)
     }
 
     this.audio.onended = () => {
       console.log('原生Audio: 播放结束, 播放模式:', store.playMode)
       if (store.playMode === 'single') {
-        this.audio?.play()
+        // 单曲循环
+        if (this.audio) {
+          this.audio.currentTime = 0
+          this.audio.play()
+        }
       } else {
-        // 使用 setTimeout 确保在后台也能触发
-        setTimeout(() => {
-          console.log('原生Audio: 切换下一首')
-          store.nextTrack()
-        }, 100)
+        // 切换下一首
+        store.nextTrack()
       }
     }
 
     this.audio.onloadedmetadata = () => {
       console.log('原生Audio: 元数据加载完成, 时长:', this.audio?.duration)
-      store.setDuration(this.audio?.duration || 0)
+      const audioDuration = this.audio?.duration || 0
+      store.setDuration(audioDuration)
+      
+      // 更新通知栏时长
+      if (store.backgroundPlayEnabled && currentTrack && audioDuration > 0) {
+        backgroundMode.updateNotification({
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          cover: currentTrack.cover,
+          duration: audioDuration
+        })
+      }
     }
 
     this.audio.onerror = (e) => {
@@ -204,7 +276,7 @@ class AudioPlayer {
 
     // 监听 timeupdate 作为备用进度更新（后台时 RAF 可能不工作）
     this.audio.ontimeupdate = () => {
-      if (document.hidden && this.audio) {
+      if (this.audio) {
         store.setCurrentTime(this.audio.currentTime)
       }
     }
@@ -241,7 +313,13 @@ class AudioPlayer {
         store.isPlaying = true
         this.startHowlerProgress()
         if (store.backgroundPlayEnabled) {
-          backgroundMode.enable(track?.title, track?.artist)
+          backgroundMode.enable({
+            title: track?.title,
+            artist: track?.artist,
+            cover: track?.cover,
+            isPlaying: true,
+            duration: this.howl?.duration() || 0
+          })
         }
       },
       onpause: () => {
@@ -358,15 +436,27 @@ class AudioPlayer {
     }
     
     const store = usePlayerStore()
-    const update = () => {
+    let lastUpdate = 0
+    const UPDATE_INTERVAL = 250 // 降低更新频率到 250ms，省电
+    
+    const update = (timestamp: number) => {
       if (this.audio && !this.audio.paused) {
-        store.setCurrentTime(this.audio.currentTime)
-        this.rafId = requestAnimationFrame(update)
+        // 节流：只在间隔时间后更新
+        if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
+          store.setCurrentTime(this.audio.currentTime)
+          lastUpdate = timestamp
+        }
+        // 页面可见时才继续 RAF，后台时依赖 timeupdate 事件
+        if (!document.hidden) {
+          this.rafId = requestAnimationFrame(update)
+        } else {
+          this.rafId = null
+        }
       } else {
         this.rafId = null
       }
     }
-    update()
+    this.rafId = requestAnimationFrame(update)
   }
 
   private startHowlerProgress() {
@@ -377,19 +467,31 @@ class AudioPlayer {
     }
     
     const store = usePlayerStore()
-    const update = () => {
+    let lastUpdate = 0
+    const UPDATE_INTERVAL = 250 // 降低更新频率到 250ms，省电
+    
+    const update = (timestamp: number) => {
       // 使用 store.isPlaying 判断，因为 howl.playing() 在某些情况下不可靠
       if (this.howl && store.isPlaying) {
-        const currentSeek = this.howl.seek()
-        if (typeof currentSeek === 'number') {
-          store.setCurrentTime(currentSeek)
+        // 节流：只在间隔时间后更新
+        if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
+          const currentSeek = this.howl.seek()
+          if (typeof currentSeek === 'number') {
+            store.setCurrentTime(currentSeek)
+          }
+          lastUpdate = timestamp
         }
-        this.rafId = requestAnimationFrame(update)
+        // 页面可见时才继续 RAF
+        if (!document.hidden) {
+          this.rafId = requestAnimationFrame(update)
+        } else {
+          this.rafId = null
+        }
       } else {
         this.rafId = null
       }
     }
-    update()
+    this.rafId = requestAnimationFrame(update)
   }
 
   destroy() {
@@ -403,7 +505,6 @@ class AudioPlayer {
     
     this.howl?.unload()
     this.howl = null
-    // 不在这里禁用后台服务，让它保持运行直到用户主动停止
   }
 
   /**
@@ -425,7 +526,13 @@ class AudioPlayer {
       : this.howl?.playing()
     
     if (enabled && isPlaying) {
-      backgroundMode.enable(track?.title || store.currentTrack?.title, track?.artist || store.currentTrack?.artist)
+      backgroundMode.enable({
+        title: track?.title || store.currentTrack?.title,
+        artist: track?.artist || store.currentTrack?.artist,
+        cover: track?.cover || store.currentTrack?.cover,
+        isPlaying: true,
+        duration: store.duration
+      })
     } else if (!enabled) {
       backgroundMode.disable()
     }
@@ -434,8 +541,8 @@ class AudioPlayer {
   /**
    * 更新通知栏信息（切歌时调用）
    */
-  updateNotification(title: string, artist: string) {
-    backgroundMode.updateNotification(title, artist)
+  updateNotification(title: string, artist: string, cover?: string, duration?: number) {
+    backgroundMode.updateNotification({ title, artist, cover, duration })
   }
 }
 

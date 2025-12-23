@@ -21,8 +21,14 @@ const store = usePlayerStore()
 const activeView = ref('home')
 const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
-// 是否显示全局搜索按钮（除设置页面外都显示）
-const showGlobalSearch = computed(() => activeView.value !== 'settings')
+// 搜索弹窗是否打开
+const isSearchOpen = computed(() => searchBarRef.value?.showMobileSearch ?? false)
+
+// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏）
+const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value)
+
+// 是否显示播放栏（搜索弹窗打开时隐藏）
+const showPlayerBar = computed(() => !isSearchOpen.value)
 
 // 动态背景
 const bgStyle = computed(() => {
@@ -131,8 +137,10 @@ provide('openGlobalSearch', openGlobalSearch)
     <!-- 全局 SearchBar（弹窗模式） -->
     <SearchBar ref="searchBarRef" :popup-only="true" />
 
-    <!-- 悬浮播放栏 -->
-    <PlayerBar />
+    <!-- 悬浮播放栏 - 搜索弹窗打开时隐藏 -->
+    <Transition name="player-bar">
+      <PlayerBar v-if="showPlayerBar" />
+    </Transition>
 
     <!-- 歌词面板 -->
     <LyricsPanel />
@@ -165,5 +173,16 @@ provide('openGlobalSearch', openGlobalSearch)
 .fab-leave-to {
   opacity: 0;
   transform: scale(0.8);
+}
+
+/* 播放栏显示/隐藏动画 */
+.player-bar-enter-active,
+.player-bar-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.player-bar-enter-from,
+.player-bar-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
@@ -78,6 +78,14 @@ function removeFromList(index: number) {
     showPlaylistDrawer.value = false
     store.toggleLyrics()
   }
+}
+
+// 清空播放列表
+function clearPlaylist() {
+  if (!confirm('确定清空播放列表？')) return
+  store.clearPlaylist()
+  showPlaylistDrawer.value = false
+  store.toggleLyrics()
 }
 
 // 收藏相关
@@ -336,12 +344,16 @@ const isUserScrolling = ref(false)
 const userScrollTimer = ref<number>()
 const seekingLyricIndex = ref(-1) // 用户滚动时选中的歌词索引
 const isTouching = ref(false) // 手指是否在触摸
+let lastScrolledIndex = -1 // 记录上次滚动的索引，避免重复滚动
 
-// 自动滚动到当前歌词
+// 自动滚动到当前歌词 - 优化：减少不必要的滚动
 watch(currentLyricIndex, (index) => {
   // 用户正在滚动时不自动滚动，或者歌词面板未显示歌词视图
   if (isUserScrolling.value || !showLyrics.value) return
+  // 避免重复滚动到同一行
+  if (index === lastScrolledIndex) return
   if (index >= 0 && lyricsContainer.value) {
+    lastScrolledIndex = index
     const el = lyricsContainer.value.children[index] as HTMLElement
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
@@ -440,12 +452,20 @@ watch(showLyrics, (show) => {
   if (show) {
     // 重置用户滚动状态
     isUserScrolling.value = false
-    // 使用 nextTick 确保 DOM 更新后立即滚动
-    nextTick(() => {
+  }
+})
+
+// Transition 进入时立即滚动
+function onLyricsEnter() {
+  if (showLyrics.value) {
+    // 立即滚动，不等待动画
+    scrollToCurrentLyric()
+    // 再次确保位置正确
+    requestAnimationFrame(() => {
       scrollToCurrentLyric()
     })
   }
-})
+}
 
 // 滚动到当前歌词位置
 function scrollToCurrentLyric() {
@@ -454,7 +474,7 @@ function scrollToCurrentLyric() {
     const el = lyricsContainer.value.children[index] as HTMLElement
     // 直接设置 scrollTop 实现即时滚动
     const scrollArea = lyricsScrollArea.value
-    if (scrollArea) {
+    if (scrollArea && el.offsetTop !== undefined) {
       const elTop = el.offsetTop
       const elHeight = el.offsetHeight
       const scrollAreaHeight = scrollArea.clientHeight
@@ -523,6 +543,8 @@ function updateProgress(e: TouchEvent | MouseEvent) {
           :style="{ backgroundImage: `url(${store.currentTrack.cover})` }"
         ></div>
         <div class="absolute inset-0 bg-black/60 backdrop-blur-3xl"></div>
+        <!-- 动态渐变光效 -->
+        <div class="absolute inset-0 lyrics-panel-glow opacity-30"></div>
       </div>
 
       <!-- 顶部栏 - 添加安全区域顶部间距 -->
@@ -568,7 +590,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
         @mouseleave="handleSwipeEnd"
         @click="!isSwiping && Math.abs(swipeOffset) < 10 && (showLyrics = !showLyrics)"
       >
-        <Transition name="disc-fade" mode="out-in">
+        <Transition name="disc-fade" mode="out-in" @enter="onLyricsEnter">
           <!-- 卡片视图 -->
           <div v-if="!showLyrics && displayMode === 'card'" key="card" class="w-full h-full relative overflow-hidden flex items-center justify-center">
             <div class="relative w-full h-full flex items-center justify-center">
@@ -611,6 +633,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                         </div>
                       </div>
                     </div>
+                    
                     <p class="text-white font-bold text-lg md:text-xl mb-1 truncate max-w-full text-center">{{ store.currentTrack?.title }}</p>
                     <p class="text-white/50 text-sm">{{ store.currentTrack?.artist }}</p>
                     <p class="text-white/30 text-xs mt-2">{{ store.currentIndex + 1 }} / {{ store.playlist.length }}</p>
@@ -837,6 +860,16 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             <p class="py-3 text-white/30 text-xs flex-shrink-0">松手跳转 · 点击返回唱片</p>
           </div>
         </Transition>
+        
+        <!-- 歌词显示区域（卡片/黑胶模式下显示，绝对定位在底部） -->
+        <div v-if="!showLyrics && lyrics.length > 0" class="absolute bottom-[80px] left-0 right-0 px-6 text-center pointer-events-none">
+          <p class="text-white/90 text-sm font-medium truncate transition-all duration-300">
+            {{ currentLyricIndex >= 0 ? lyrics[currentLyricIndex]?.text : '♪ ♪ ♪' }}
+          </p>
+          <p v-if="currentLyricIndex >= 0 && currentLyricIndex + 1 < lyrics.length" class="text-white/50 text-xs truncate transition-all duration-300 mt-1">
+            {{ lyrics[currentLyricIndex + 1]?.text }}
+          </p>
+        </div>
       </div>
 
       <!-- 底部播放控制 -->
@@ -1043,7 +1076,18 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             <span class="text-white/40 text-sm">({{ store.playlist.length }}首)</span>
           </div>
           <div class="flex items-center gap-2">
-            <span class="text-white/50 text-xs px-2 py-1 rounded bg-white/10">{{ playModeText }}</span>
+            <button 
+              @click="clearPlaylist" 
+              class="text-white/50 hover:text-red-400 text-xs px-2 py-1 rounded bg-white/10 hover:bg-red-500/20 transition-colors"
+            >
+              清空
+            </button>
+            <button 
+              @click="store.togglePlayMode()" 
+              class="text-white/50 hover:text-purple-400 text-xs px-2 py-1 rounded bg-white/10 hover:bg-purple-500/20 transition-colors"
+            >
+              {{ playModeText }}
+            </button>
             <button @click="showPlaylistDrawer = false" class="text-white/50 hover:text-white p-1">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -1314,5 +1358,39 @@ function updateProgress(e: TouchEvent | MouseEvent) {
 .cache-dot-small-leave-to {
   opacity: 0;
   transform: scale(0);
+}
+
+/* 动态渐变光效 */
+.lyrics-panel-glow {
+  background: linear-gradient(
+    135deg,
+    rgba(139, 92, 246, 0.6),
+    rgba(236, 72, 153, 0.5),
+    rgba(59, 130, 246, 0.5),
+    rgba(16, 185, 129, 0.4),
+    rgba(245, 158, 11, 0.5),
+    rgba(239, 68, 68, 0.5),
+    rgba(139, 92, 246, 0.6)
+  );
+  background-size: 400% 400%;
+  animation: lyrics-glow-shift 15s ease infinite;
+}
+
+@keyframes lyrics-glow-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  25% {
+    background-position: 50% 100%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  75% {
+    background-position: 50% 0%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 </style>

@@ -233,8 +233,10 @@ function playAllHot() {
 let bannerTimer: number | null = null
 function startBannerTimer() {
   stopBannerTimer()
+  // 只在页面可见时运行定时器，省电
+  if (document.hidden) return
   bannerTimer = window.setInterval(() => {
-    if (bannerSongs.value.length > 0) {
+    if (bannerSongs.value.length > 0 && !document.hidden) {
       currentBannerIndex.value = (currentBannerIndex.value + 1) % bannerSongs.value.length
     }
   }, 4000)
@@ -244,6 +246,15 @@ function stopBannerTimer() {
   if (bannerTimer) {
     clearInterval(bannerTimer)
     bannerTimer = null
+  }
+}
+
+// 页面可见性变化时控制定时器
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopBannerTimer()
+  } else {
+    startBannerTimer()
   }
 }
 
@@ -308,10 +319,13 @@ async function handlePullEnd() {
 onMounted(() => {
   loadRecommendData()
   startBannerTimer()
+  // 监听页面可见性变化
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
   stopBannerTimer()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -486,8 +500,12 @@ onUnmounted(() => {
 
       <!-- 正在播放卡片 -->
       <section v-if="store.playlist.length > 0" class="mt-6 px-4 md:px-6">
-        <button @click="emit('navigate', 'playlist')" class="w-full p-4 rounded-2xl bg-gradient-to-r from-purple-900/50 to-pink-900/50 border border-white/10 hover:border-purple-500/50 transition-all group">
-          <div class="flex items-center gap-4">
+        <div class="now-playing-card w-full rounded-2xl border border-white/10 hover:border-white/20 transition-all group relative overflow-hidden">
+          <!-- 动态渐变背景 -->
+          <div class="absolute inset-0 now-playing-bg"></div>
+          
+          <!-- 主内容区 -->
+          <button @click="emit('navigate', 'playlist')" class="relative w-full p-4 flex items-center gap-4">
             <div class="relative w-14 h-14 rounded-xl overflow-hidden bg-white/10 flex-shrink-0">
               <div v-if="store.currentTrack?.cover" class="w-full h-full">
                 <img :src="store.currentTrack.cover" class="w-full h-full object-cover" />
@@ -512,8 +530,8 @@ onUnmounted(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
             </div>
-          </div>
-        </button>
+          </button>
+        </div>
       </section>
 
       <!-- 热门推荐 - 热歌榜 -->
@@ -615,5 +633,61 @@ onUnmounted(() => {
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* 正在播放卡片动态渐变背景 */
+.now-playing-bg {
+  background: linear-gradient(
+    135deg,
+    rgba(139, 92, 246, 0.4),
+    rgba(236, 72, 153, 0.4),
+    rgba(59, 130, 246, 0.4),
+    rgba(16, 185, 129, 0.4),
+    rgba(245, 158, 11, 0.4),
+    rgba(239, 68, 68, 0.4),
+    rgba(139, 92, 246, 0.4)
+  );
+  background-size: 400% 400%;
+  animation: gradientShift 12s ease infinite;
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  25% {
+    background-position: 50% 100%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  75% {
+    background-position: 50% 0%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.now-playing-card:hover .now-playing-bg {
+  animation-duration: 6s;
+}
+
+/* 歌词滑动动画 */
+.lyrics-slide-enter-active,
+.lyrics-slide-leave-active {
+  transition: all 0.3s ease;
+}
+.lyrics-slide-enter-from,
+.lyrics-slide-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.lyrics-slide-enter-to,
+.lyrics-slide-leave-from {
+  opacity: 1;
+  max-height: 60px;
 }
 </style>

@@ -47,6 +47,11 @@ const navItems = [
     id: 'local', 
     label: '本地',
     path: 'M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z' 
+  },
+  { 
+    id: 'settings', 
+    label: '设置',
+    path: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' 
   }
 ]
 
@@ -56,13 +61,8 @@ function handleNav(id: string) {
 </script>
 
 <template>
-  <aside class="w-20 h-full flex flex-col items-center py-6 gap-4 bg-black/20 backdrop-blur-xl border-r border-white/5">
-    <!-- Logo -->
-    <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-purple-500/20 mb-4">
-      Z
-    </div>
-
-    <nav class="flex flex-col gap-2 w-full px-3">
+  <aside class="w-20 h-full flex flex-col items-center py-4 bg-black/20 backdrop-blur-xl border-r border-white/5">
+    <nav class="flex flex-col gap-2 w-full px-3 overflow-y-auto">
       <button
         v-for="item in navItems"
         :key="item.id"
@@ -93,21 +93,5 @@ function handleNav(id: string) {
         ></div>
       </button>
     </nav>
-
-    <div class="mt-auto px-3 w-full">
-      <button
-        @click="handleNav('settings')"
-        :class="[
-          'w-full aspect-square rounded-xl flex items-center justify-center transition-all duration-300 group',
-          activeView === 'settings' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'
-        ]"
-        title="设置"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 group-hover:rotate-90 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
-    </div>
   </aside>
 </template>

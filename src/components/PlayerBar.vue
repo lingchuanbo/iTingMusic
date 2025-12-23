@@ -1,11 +1,47 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
+import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 
 const store = usePlayerStore()
 const showPlaylist = ref(false)
+
+// 歌词显示开关
+const showLyrics = ref(false)
+const PLAYER_BAR_LYRICS_KEY = 'player_bar_lyrics_visible'
+
+onMounted(() => {
+  const saved = localStorage.getItem(PLAYER_BAR_LYRICS_KEY)
+  if (saved !== null) {
+    showLyrics.value = saved === 'true'
+  }
+})
+
+function toggleLyrics() {
+  showLyrics.value = !showLyrics.value
+  localStorage.setItem(PLAYER_BAR_LYRICS_KEY, String(showLyrics.value))
+}
+
+// 当前歌词
+const currentLyrics = computed(() => {
+  if (!store.currentTrack?.lrc) return []
+  return parseLyrics(store.currentTrack.lrc)
+})
+
+const currentLyricIndex = computed(() => {
+  return getCurrentLyricIndex(currentLyrics.value, store.currentTime)
+})
+
+// 获取当前和下一句歌词
+const displayLyrics = computed(() => {
+  if (currentLyrics.value.length === 0) return { current: '', next: '' }
+  const idx = currentLyricIndex.value
+  const current = idx >= 0 ? currentLyrics.value[idx]?.text || '' : ''
+  const next = idx >= 0 && idx + 1 < currentLyrics.value.length ? currentLyrics.value[idx + 1]?.text || '' : ''
+  return { current, next }
+})
 
 // 播放控制
 function handleToggle() {
@@ -104,11 +140,36 @@ function clearPlaylist() {
 
         <!-- 歌曲信息 -->
         <div class="flex-1 min-w-0" @click="store.toggleLyrics()">
-          <p class="text-white text-sm font-medium truncate">
-            {{ store.currentTrack.title }}
-          </p>
-          <p class="text-white/60 text-xs truncate">{{ store.currentTrack.artist }}</p>
+          <!-- 歌词模式 -->
+          <template v-if="showLyrics && store.currentTrack?.lrc">
+            <p class="text-white text-sm font-medium truncate transition-all duration-300">
+              {{ displayLyrics.current || '♪ ♪ ♪' }}
+            </p>
+            <p class="text-white/50 text-xs truncate transition-all duration-300">
+              {{ displayLyrics.next || store.currentTrack.artist }}
+            </p>
+          </template>
+          <!-- 普通模式 -->
+          <template v-else>
+            <p class="text-white text-sm font-medium truncate">
+              {{ store.currentTrack.title }}
+            </p>
+            <p class="text-white/60 text-xs truncate">{{ store.currentTrack.artist }}</p>
+          </template>
         </div>
+
+        <!-- 歌词开关按钮 -->
+        <button
+          v-if="store.currentTrack?.lrc"
+          @click.stop="toggleLyrics"
+          :class="[
+            'w-8 h-8 rounded-full flex items-center justify-center transition-all text-sm font-bold',
+            showLyrics ? 'bg-purple-600/30 text-purple-400' : 'text-white/40 hover:bg-white/10 hover:text-white/70'
+          ]"
+          title="显示/隐藏歌词"
+        >
+          词
+        </button>
 
         <!-- 播放/暂停按钮 -->
         <button
@@ -239,13 +300,23 @@ function clearPlaylist() {
 </template>
 
 <style scoped>
-/* 唱片旋转动画 */
+/* 唱片旋转动画 - 使用 will-change 优化 GPU 渲染 */
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 .animate-spin-slow {
   animation: spin-slow 8s linear infinite;
+  will-change: transform;
+  /* 使用 GPU 加速，减少 CPU 负担 */
+  transform: translateZ(0);
+}
+
+/* 页面不可见时暂停动画，省电 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin-slow {
+    animation: none;
+  }
 }
 
 /* 移动端播放栏定位 - 在底部导航栏上方 */

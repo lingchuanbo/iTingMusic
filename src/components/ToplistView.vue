@@ -1,24 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import {
   getToplists,
   getToplistSongs,
   searchResultToTrack,
   getLyrics,
+  getEnabledSources,
   type MusicSource,
   type ToplistItem,
   type SearchResult
 } from '@/services/source/OnlineApiSource'
 
 const store = usePlayerStore()
-const sources: { value: MusicSource; label: string; icon: string }[] = [
+
+// 所有可用的音乐源配置
+const allSources: { value: MusicSource; label: string; icon: string }[] = [
   { value: 'netease', label: '网易云', icon: '🎵' },
   { value: 'kuwo', label: '酷我', icon: '🎶' },
-  { value: 'qq', label: 'QQ', icon: '🎧' }
+  { value: 'kugou', label: '酷狗', icon: '🎤' },
+  { value: 'qq', label: 'QQ', icon: '🎧' },
+  { value: 'migu', label: '咪咕', icon: '📻' }
 ]
 
-const currentSource = ref<MusicSource>('netease')
+// 只显示启用的音乐源
+const sources = computed(() => {
+  const enabled = getEnabledSources()
+  return allSources.filter(s => enabled.includes(s.value))
+})
+
+// 默认选中第一个启用的源
+const currentSource = ref<MusicSource>(getEnabledSources()[0] || 'netease')
 const toplists = ref<ToplistItem[]>([])
 const selectedList = ref<ToplistItem | null>(null)
 const songs = ref<SearchResult[]>([])

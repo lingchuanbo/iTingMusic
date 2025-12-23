@@ -240,21 +240,21 @@ function createAndAdd() {
 
     <!-- 多选操作栏 -->
     <div v-if="isSelectMode" class="flex items-center justify-between mb-4 p-3 rounded-xl bg-purple-600/20 border border-purple-500/30">
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 flex-shrink-0">
         <button @click="exitSelectMode" class="text-white/60 hover:text-white">✕</button>
-        <span class="text-white">已选 {{ selectedCount }} 首</span>
+        <span class="text-white text-sm whitespace-nowrap">已选 {{ selectedCount }}</span>
       </div>
-      <div class="flex items-center gap-2">
-        <button @click="toggleSelectAll" class="px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20">
+      <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+        <button @click="toggleSelectAll" class="px-2 md:px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs md:text-sm hover:bg-white/20 whitespace-nowrap">
           {{ selectedIndexes.size === store.playlist.length ? '取消全选' : '全选' }}
         </button>
-        <button @click="batchPlay" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-500 disabled:opacity-50">
+        <button @click="batchPlay" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs md:text-sm hover:bg-purple-500 disabled:opacity-50 whitespace-nowrap">
           播放
         </button>
-        <button @click="batchAddToFavorite" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-white/10 text-white text-sm hover:bg-white/20 disabled:opacity-50">
+        <button @click="batchAddToFavorite" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs md:text-sm hover:bg-white/20 disabled:opacity-50 whitespace-nowrap">
           喜欢
         </button>
-        <button @click="batchRemove" :disabled="selectedCount === 0" class="px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-sm hover:bg-red-500 disabled:opacity-50">
+        <button @click="batchRemove" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-xs md:text-sm hover:bg-red-500 disabled:opacity-50 whitespace-nowrap">
           移除
         </button>
       </div>

@@ -447,64 +447,52 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
       </div>
       
       <div class="relative px-4 md:px-6 pt-6 pb-4">
-        <!-- AI 角色卡片 -->
-        <div class="mb-6">
+        <!-- AI 角色卡片（紧凑版） -->
+        <div class="mb-4">
           <div
             @click="showRoleSelector = !showRoleSelector"
-            class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/10 p-4 cursor-pointer transition-all duration-300 hover:border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/10"
+            class="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-white/8 to-white/4 backdrop-blur-xl border border-white/10 p-3 cursor-pointer transition-all duration-300 hover:border-purple-500/30 hover:shadow-lg hover:shadow-purple-500/10"
           >
             <div class="absolute inset-0 bg-gradient-to-r from-purple-600/10 via-transparent to-pink-600/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            <div class="relative flex items-center gap-4">
+            <div class="relative flex items-center gap-3">
               <div class="relative">
-                <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 flex items-center justify-center text-2xl shadow-lg shadow-purple-500/25">
+                <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 flex items-center justify-center text-xl shadow-lg shadow-purple-500/25">
                   {{ currentRole.avatar }}
                 </div>
-                <div class="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900"></div>
+                <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-slate-900"></div>
               </div>
               <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-white font-semibold text-lg">{{ currentRole.name }}</span>
-                  <span class="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-xs font-medium">AI</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-white font-semibold">{{ currentRole.name }}</span>
+                  <span class="px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 text-[10px] font-medium">AI</span>
                 </div>
-                <p class="text-white/50 text-sm truncate">{{ currentRole.greeting }}</p>
+                <p class="text-white/40 text-xs truncate mt-0.5">{{ currentRole.greeting }}</p>
               </div>
-              <div class="flex items-center gap-2">
-                <span class="text-white/30 text-xs hidden sm:block">切换角色</span>
-                <svg class="w-5 h-5 text-white/40 transition-transform" :class="showRoleSelector ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                </svg>
-              </div>
+              <svg class="w-4 h-4 text-white/30 transition-transform flex-shrink-0" :class="showRoleSelector ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
             </div>
           </div>
 
-          <!-- 角色选择器 -->
+          <!-- 角色选择器（紧凑版） -->
           <Transition name="expand">
-            <div v-if="showRoleSelector" class="mt-3 p-4 rounded-2xl bg-black/60 backdrop-blur-xl border border-white/10">
-              <p class="text-white/40 text-xs mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
-                </svg>
-                选择 AI 角色，不同角色有不同的音乐品味
-              </p>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div v-if="showRoleSelector" class="mt-2 p-3 rounded-xl bg-black/50 backdrop-blur-xl border border-white/10">
+              <div class="grid grid-cols-4 gap-1.5">
                 <button
                   v-for="role in AI_ROLES"
                   :key="role.id"
                   @click="selectRole(role)"
                   :class="[
-                    'group relative p-3 rounded-xl text-left transition-all duration-200 overflow-hidden',
+                    'relative p-2 rounded-xl text-center transition-all duration-200',
                     currentRole.id === role.id
-                      ? 'bg-gradient-to-br from-purple-600/40 to-pink-600/40 border-2 border-purple-400/50 shadow-lg shadow-purple-500/20'
-                      : 'bg-white/5 hover:bg-white/10 border border-transparent hover:border-white/20'
+                      ? 'bg-gradient-to-br from-purple-600/40 to-pink-600/40 border border-purple-400/50'
+                      : 'bg-white/5 hover:bg-white/10 border border-transparent'
                   ]"
                 >
-                  <div class="flex items-center gap-2 mb-1.5">
-                    <span class="text-xl">{{ role.avatar }}</span>
-                    <span class="text-white text-sm font-medium">{{ role.name }}</span>
-                  </div>
-                  <p class="text-white/40 text-xs line-clamp-2">{{ role.description }}</p>
-                  <div v-if="currentRole.id === role.id" class="absolute top-2 right-2">
-                    <svg class="w-4 h-4 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
+                  <span class="text-xl block mb-1">{{ role.avatar }}</span>
+                  <span class="text-white text-[10px] font-medium block truncate">{{ role.name }}</span>
+                  <div v-if="currentRole.id === role.id" class="absolute top-1 right-1">
+                    <svg class="w-3 h-3 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                     </svg>
                   </div>
@@ -515,73 +503,64 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
         </div>
 
         <!-- 偏好设置按钮 -->
-        <div class="mb-5 flex items-center gap-3 flex-wrap">
+        <div class="mb-4 flex items-center gap-2 flex-wrap">
           <button
             @click="showPreferences = !showPreferences"
             :class="[
-              'px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 flex items-center gap-2',
+              'px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-1.5',
               showPreferences 
                 ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/25' 
-                : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/10'
+                : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white border border-white/10'
             ]"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
             </svg>
-            偏好设置
+            偏好
           </button>
-          <!-- 当前偏好标签 -->
-          <div class="flex flex-wrap gap-1.5">
+          <!-- 当前偏好标签（更紧凑） -->
+          <div class="flex flex-wrap gap-1">
             <span 
-              v-for="lang in preferences.languages"
+              v-for="lang in preferences.languages.slice(0, 2)"
               :key="lang"
-              class="px-2.5 py-1 rounded-full bg-gradient-to-r from-purple-500/20 to-purple-600/20 text-purple-300 text-xs font-medium border border-purple-500/20"
+              class="px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-300 text-[10px] font-medium"
             >
               {{ LANGUAGE_OPTIONS.find(o => o.value === lang)?.label }}
             </span>
             <span
-              v-for="era in preferences.eras"
+              v-for="era in preferences.eras.slice(0, 1)"
               :key="era"
-              class="px-2.5 py-1 rounded-full bg-gradient-to-r from-blue-500/20 to-blue-600/20 text-blue-300 text-xs font-medium border border-blue-500/20"
+              class="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-300 text-[10px] font-medium"
             >
               {{ ERA_OPTIONS.find(o => o.value === era)?.label }}
             </span>
             <span
-              v-for="mood in preferences.moods"
-              :key="mood"
-              class="px-2.5 py-1 rounded-full bg-gradient-to-r from-green-500/20 to-green-600/20 text-green-300 text-xs font-medium border border-green-500/20"
+              v-if="preferences.languages.length + preferences.eras.length + preferences.moods.length + preferences.vocals.length > 3"
+              class="px-2 py-0.5 rounded-md bg-white/10 text-white/40 text-[10px]"
             >
-              {{ MOOD_OPTIONS.find(o => o.value === mood)?.label }}
-            </span>
-            <span
-              v-for="vocal in preferences.vocals"
-              :key="vocal"
-              class="px-2.5 py-1 rounded-full bg-gradient-to-r from-orange-500/20 to-orange-600/20 text-orange-300 text-xs font-medium border border-orange-500/20"
-            >
-              {{ VOCAL_OPTIONS.find(o => o.value === vocal)?.label }}
+              +{{ preferences.languages.length + preferences.eras.length + preferences.moods.length + preferences.vocals.length - 3 }}
             </span>
           </div>
         </div>
 
-        <!-- 偏好设置面板 -->
+        <!-- 偏好设置面板（更紧凑） -->
         <Transition name="expand">
-          <div v-if="showPreferences" class="mb-5 p-5 rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 space-y-5">
+          <div v-if="showPreferences" class="mb-4 p-4 rounded-xl bg-black/40 backdrop-blur-xl border border-white/10 space-y-4">
             <!-- 语言偏好 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-purple-500/20 flex items-center justify-center text-xs">🌐</span>
-                语言偏好 <span class="text-white/30 font-normal">（可多选）</span>
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>🌐</span> 语言
               </p>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap gap-1.5">
                 <button
                   v-for="opt in LANGUAGE_OPTIONS"
                   :key="opt.value"
                   @click="togglePreference('languages', opt.value)"
                   :class="[
-                    'px-4 py-2 rounded-xl text-sm transition-all duration-200',
+                    'px-3 py-1.5 rounded-lg text-xs transition-all duration-200',
                     preferences.languages.includes(opt.value)
-                      ? 'bg-gradient-to-r from-purple-600 to-purple-700 text-white shadow-lg shadow-purple-500/20'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/5'
+                      ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/20'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                   ]"
                 >
                   {{ opt.icon }} {{ opt.label }}
@@ -591,20 +570,19 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
             <!-- 年代偏好 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-blue-500/20 flex items-center justify-center text-xs">📅</span>
-                年代偏好 <span class="text-white/30 font-normal">（可多选）</span>
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>📅</span> 年代
               </p>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap gap-1.5">
                 <button
                   v-for="opt in ERA_OPTIONS"
                   :key="opt.value"
                   @click="togglePreference('eras', opt.value)"
                   :class="[
-                    'px-4 py-2 rounded-xl text-sm transition-all duration-200',
+                    'px-3 py-1.5 rounded-lg text-xs transition-all duration-200',
                     preferences.eras.includes(opt.value)
-                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/20'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/5'
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                   ]"
                 >
                   {{ opt.icon }} {{ opt.label }}
@@ -614,20 +592,19 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
             <!-- 情绪偏好 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-green-500/20 flex items-center justify-center text-xs">🎭</span>
-                情绪偏好 <span class="text-white/30 font-normal">（可多选）</span>
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>🎭</span> 情绪
               </p>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap gap-1.5">
                 <button
                   v-for="opt in MOOD_OPTIONS"
                   :key="opt.value"
                   @click="togglePreference('moods', opt.value)"
                   :class="[
-                    'px-4 py-2 rounded-xl text-sm transition-all duration-200',
+                    'px-3 py-1.5 rounded-lg text-xs transition-all duration-200',
                     preferences.moods.includes(opt.value)
-                      ? 'bg-gradient-to-r from-green-600 to-green-700 text-white shadow-lg shadow-green-500/20'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/5'
+                      ? 'bg-green-600 text-white shadow-lg shadow-green-500/20'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                   ]"
                 >
                   {{ opt.icon }} {{ opt.label }}
@@ -637,20 +614,19 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
             <!-- 人声偏好 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-orange-500/20 flex items-center justify-center text-xs">🎤</span>
-                人声偏好 <span class="text-white/30 font-normal">（可多选）</span>
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>🎤</span> 人声
               </p>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex flex-wrap gap-1.5">
                 <button
                   v-for="opt in VOCAL_OPTIONS"
                   :key="opt.value"
                   @click="togglePreference('vocals', opt.value)"
                   :class="[
-                    'px-4 py-2 rounded-xl text-sm transition-all duration-200',
+                    'px-3 py-1.5 rounded-lg text-xs transition-all duration-200',
                     preferences.vocals.includes(opt.value)
-                      ? 'bg-gradient-to-r from-orange-600 to-orange-700 text-white shadow-lg shadow-orange-500/20'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/5'
+                      ? 'bg-orange-600 text-white shadow-lg shadow-orange-500/20'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                   ]"
                 >
                   {{ opt.icon }} {{ opt.label }}
@@ -660,31 +636,30 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
             <!-- 喜欢的歌手 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-pink-500/20 flex items-center justify-center text-xs">❤️</span>
-                喜欢的歌手
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>❤️</span> 喜欢的歌手
               </p>
-              <div class="flex flex-wrap gap-2 mb-3">
+              <div class="flex flex-wrap gap-1.5 mb-2">
                 <span
                   v-for="artist in preferences.favoriteArtists"
                   :key="artist"
-                  class="group px-3 py-1.5 rounded-xl bg-gradient-to-r from-pink-500/20 to-rose-500/20 text-pink-300 text-sm flex items-center gap-2 border border-pink-500/20"
+                  class="px-2.5 py-1 rounded-lg bg-pink-500/20 text-pink-300 text-xs flex items-center gap-1.5"
                 >
                   {{ artist }}
-                  <button @click="removeFavoriteArtist(artist)" class="w-4 h-4 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition-colors">×</button>
+                  <button @click="removeFavoriteArtist(artist)" class="w-3.5 h-3.5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[10px]">×</button>
                 </span>
-                <span v-if="preferences.favoriteArtists.length === 0" class="text-white/30 text-sm">暂无</span>
+                <span v-if="preferences.favoriteArtists.length === 0" class="text-white/30 text-xs">暂无</span>
               </div>
               <div class="flex gap-2">
                 <input
                   v-model="newFavoriteArtist"
                   type="text"
-                  placeholder="添加歌手名"
-                  class="flex-1 h-10 px-4 rounded-xl bg-white/5 text-white text-sm placeholder-white/30 outline-none border border-white/10 focus:border-pink-500/50 focus:bg-white/10 transition-all"
+                  placeholder="添加歌手"
+                  class="flex-1 h-9 px-3 rounded-lg bg-white/5 text-white text-xs placeholder-white/30 outline-none border border-white/10 focus:border-pink-500/50 transition-all"
                   @keyup.enter="addFavoriteArtist"
                 />
-                <button @click="addFavoriteArtist" class="w-10 h-10 rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 text-white flex items-center justify-center hover:shadow-lg hover:shadow-pink-500/25 transition-all">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button @click="addFavoriteArtist" class="w-9 h-9 rounded-lg bg-pink-600 text-white flex items-center justify-center hover:bg-pink-500 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                   </svg>
                 </button>
@@ -693,31 +668,30 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
             <!-- 不喜欢的歌手 -->
             <div>
-              <p class="text-white/70 text-sm mb-3 flex items-center gap-2 font-medium">
-                <span class="w-6 h-6 rounded-lg bg-red-500/20 flex items-center justify-center text-xs">💔</span>
-                不喜欢的歌手 <span class="text-white/30 font-normal">（会避免推荐）</span>
+              <p class="text-white/60 text-xs mb-2 flex items-center gap-1.5 font-medium">
+                <span>💔</span> 不喜欢的歌手
               </p>
-              <div class="flex flex-wrap gap-2 mb-3">
+              <div class="flex flex-wrap gap-1.5 mb-2">
                 <span
                   v-for="artist in preferences.dislikedArtists"
                   :key="artist"
-                  class="group px-3 py-1.5 rounded-xl bg-gradient-to-r from-red-500/20 to-red-600/20 text-red-300 text-sm flex items-center gap-2 border border-red-500/20"
+                  class="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 text-xs flex items-center gap-1.5"
                 >
                   {{ artist }}
-                  <button @click="removeDislikedArtist(artist)" class="w-4 h-4 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-xs transition-colors">×</button>
+                  <button @click="removeDislikedArtist(artist)" class="w-3.5 h-3.5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-[10px]">×</button>
                 </span>
-                <span v-if="preferences.dislikedArtists.length === 0" class="text-white/30 text-sm">暂无</span>
+                <span v-if="preferences.dislikedArtists.length === 0" class="text-white/30 text-xs">暂无</span>
               </div>
               <div class="flex gap-2">
                 <input
                   v-model="newDislikedArtist"
                   type="text"
-                  placeholder="添加歌手名"
-                  class="flex-1 h-10 px-4 rounded-xl bg-white/5 text-white text-sm placeholder-white/30 outline-none border border-white/10 focus:border-red-500/50 focus:bg-white/10 transition-all"
+                  placeholder="添加歌手"
+                  class="flex-1 h-9 px-3 rounded-lg bg-white/5 text-white text-xs placeholder-white/30 outline-none border border-white/10 focus:border-red-500/50 transition-all"
                   @keyup.enter="addDislikedArtist"
                 />
-                <button @click="addDislikedArtist" class="w-10 h-10 rounded-xl bg-gradient-to-r from-red-600 to-red-700 text-white flex items-center justify-center hover:shadow-lg hover:shadow-red-500/25 transition-all">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button @click="addDislikedArtist" class="w-9 h-9 rounded-lg bg-red-600 text-white flex items-center justify-center hover:bg-red-500 transition-all">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                   </svg>
                 </button>
@@ -727,76 +701,67 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
         </Transition>
 
         <!-- 未配置提示 -->
-        <div v-if="!isAIConfigured()" class="mb-5 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/20 flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
-            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div v-if="!isAIConfigured()" class="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
             </svg>
           </div>
           <div>
-            <p class="text-amber-200 text-sm font-medium">需要配置 AI</p>
-            <p class="text-amber-200/60 text-xs">请先在设置中配置 AI API Key</p>
+            <p class="text-amber-200 text-xs font-medium">需要配置 AI</p>
+            <p class="text-amber-200/60 text-[10px]">请先在设置中配置 AI API Key</p>
           </div>
         </div>
 
         <!-- 输入区域 -->
-        <div class="mb-5">
-          <div class="relative">
-            <div class="flex gap-3">
-              <div class="flex-1 relative">
-                <input
-                  v-model="userInput"
-                  type="text"
-                  :placeholder="`问 ${currentRole.name}：想听什么歌？`"
-                  class="w-full h-12 pl-5 pr-12 rounded-2xl bg-white/5 text-white placeholder-white/30 outline-none border border-white/10 focus:border-purple-500/50 focus:bg-white/10 focus:shadow-lg focus:shadow-purple-500/10 transition-all text-sm"
-                  @keyup.enter="getRecommendations"
-                  :disabled="loading"
-                />
-                <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                  <button v-if="userInput" @click="userInput = ''" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/40 hover:text-white transition-all">
-                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <button
-                @click="getRecommendations"
-                :disabled="loading || !userInput.trim()"
-                class="px-6 h-12 rounded-2xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 flex items-center gap-2"
-              >
-                <svg v-if="!loading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        <div class="mb-4">
+          <div class="flex gap-2">
+            <div class="flex-1 relative">
+              <input
+                v-model="userInput"
+                type="text"
+                :placeholder="`问 ${currentRole.name}：想听什么歌？`"
+                class="w-full h-11 pl-4 pr-10 rounded-xl bg-white/5 text-white placeholder-white/30 outline-none border border-white/10 focus:border-purple-500/50 focus:bg-white/10 transition-all text-sm"
+                @keyup.enter="getRecommendations"
+                :disabled="loading"
+              />
+              <button v-if="userInput" @click="userInput = ''" class="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/40 hover:text-white transition-all">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
-                <svg v-else class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                {{ loading ? '推荐中' : '推荐' }}
               </button>
             </div>
+            <button
+              @click="getRecommendations"
+              :disabled="loading || !userInput.trim()"
+              :class="[
+                'h-11 w-11 rounded-xl flex items-center justify-center transition-all',
+                userInput.trim() && !loading
+                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50'
+                  : 'bg-white/10 text-white/30'
+              ]"
+            >
+              <svg v-if="!loading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            </button>
           </div>
         </div>
 
         <!-- 快捷提示 -->
-        <div v-if="!loading && recommendations.length === 0" class="mb-5">
-          <p class="text-white/40 text-xs mb-3 flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>
-            快速开始
-          </p>
-          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+        <div v-if="!loading && recommendations.length === 0" class="mb-4">
+          <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5">
             <button
               v-for="item in quickPrompts"
               :key="item.label"
               @click="useQuickPrompt(item.prompt)"
-              class="group relative overflow-hidden p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/20 transition-all duration-200 text-left"
+              class="group relative overflow-hidden p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/15 transition-all duration-200 text-center"
             >
               <div class="absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity" :class="item.color"></div>
-              <div class="relative flex items-center gap-2">
-                <span class="text-lg">{{ item.icon }}</span>
-                <span class="text-white/70 group-hover:text-white text-sm font-medium transition-colors">{{ item.label }}</span>
+              <div class="relative">
+                <span class="text-lg block mb-0.5">{{ item.icon }}</span>
+                <span class="text-white/60 group-hover:text-white text-[10px] font-medium transition-colors">{{ item.label }}</span>
               </div>
             </button>
           </div>
@@ -804,32 +769,32 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
         <!-- 错误提示 -->
         <Transition name="fade">
-          <div v-if="error" class="mb-5 p-4 rounded-2xl bg-gradient-to-r from-red-500/10 to-red-600/10 border border-red-500/20 flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
-              <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div v-if="error" class="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-red-500/20 flex items-center justify-center flex-shrink-0">
+              <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
             </div>
-            <p class="text-red-200 text-sm">{{ error }}</p>
+            <p class="text-red-200 text-xs">{{ error }}</p>
           </div>
         </Transition>
 
         <!-- AI 思考过程 -->
         <Transition name="fade">
-          <div v-if="loading && thinkingPhase === 'thinking'" class="mb-5">
-            <div class="p-5 rounded-2xl bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 backdrop-blur-xl">
-              <div class="flex items-center gap-3 mb-4">
+          <div v-if="loading && thinkingPhase === 'thinking'" class="mb-4">
+            <div class="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 backdrop-blur-xl">
+              <div class="flex items-center gap-3 mb-3">
                 <div class="relative">
-                  <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg animate-pulse">
+                  <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg animate-pulse">
                     {{ currentRole.avatar }}
                   </div>
-                  <div class="absolute -bottom-1 -right-1 w-3 h-3 bg-purple-500 rounded-full animate-ping"></div>
+                  <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-purple-500 rounded-full animate-ping"></div>
                 </div>
                 <div class="flex-1">
-                  <span class="text-white font-medium">{{ currentRole.name }}</span>
-                  <span class="text-purple-300 text-sm ml-2">正在为你挑选歌曲...</span>
+                  <span class="text-white font-medium text-sm">{{ currentRole.name }}</span>
+                  <span class="text-purple-300 text-xs ml-2">正在为你挑选歌曲...</span>
                 </div>
-                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/20 text-purple-300 text-xs">
+                <div class="flex items-center gap-1 px-2 py-1 rounded-md bg-purple-500/20 text-purple-300 text-[10px]">
                   <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -841,31 +806,31 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
               <!-- 思考内容展示 -->
               <div class="relative">
                 <!-- 解析并展示思考内容 -->
-                <div v-if="parsedThinking.reason || parsedThinking.songs.length > 0" class="space-y-4">
+                <div v-if="parsedThinking.reason || parsedThinking.songs.length > 0" class="space-y-3">
                   <!-- 推荐理由 -->
-                  <div v-if="parsedThinking.reason" class="p-3 rounded-xl bg-white/5 border border-white/10">
-                    <div class="flex items-center gap-2 mb-2">
-                      <span class="text-purple-400 text-xs font-medium">💭 推荐理由</span>
+                  <div v-if="parsedThinking.reason" class="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                    <div class="flex items-center gap-1.5 mb-1.5">
+                      <span class="text-purple-400 text-[10px] font-medium">💭 推荐理由</span>
                     </div>
-                    <p class="text-white/80 text-sm leading-relaxed">{{ parsedThinking.reason }}</p>
+                    <p class="text-white/80 text-xs leading-relaxed">{{ parsedThinking.reason }}</p>
                   </div>
                   
                   <!-- 已识别的歌曲 -->
                   <div v-if="parsedThinking.songs.length > 0">
-                    <div class="flex items-center gap-2 mb-2">
-                      <span class="text-green-400 text-xs font-medium">🎵 正在推荐</span>
-                      <span class="text-white/30 text-xs">{{ parsedThinking.songs.length }} 首</span>
+                    <div class="flex items-center gap-1.5 mb-1.5">
+                      <span class="text-green-400 text-[10px] font-medium">🎵 正在推荐</span>
+                      <span class="text-white/30 text-[10px]">{{ parsedThinking.songs.length }} 首</span>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="grid grid-cols-2 gap-1.5">
                       <div 
                         v-for="(song, idx) in parsedThinking.songs" 
                         :key="idx"
-                        class="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/5"
+                        class="flex items-center gap-1.5 p-2 rounded-lg bg-white/5 border border-white/5"
                       >
-                        <span class="w-5 h-5 rounded bg-purple-500/20 text-purple-300 text-xs flex items-center justify-center">{{ idx + 1 }}</span>
+                        <span class="w-4 h-4 rounded bg-purple-500/20 text-purple-300 text-[10px] flex items-center justify-center flex-shrink-0">{{ idx + 1 }}</span>
                         <div class="flex-1 min-w-0">
-                          <p class="text-white/90 text-xs font-medium truncate">{{ song.title }}</p>
-                          <p class="text-white/40 text-xs truncate">{{ song.artist }}</p>
+                          <p class="text-white/90 text-[10px] font-medium truncate">{{ song.title }}</p>
+                          <p class="text-white/40 text-[10px] truncate">{{ song.artist }}</p>
                         </div>
                       </div>
                     </div>
@@ -873,10 +838,10 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
                 </div>
                 
                 <!-- 原始文本（当无法解析时显示） -->
-                <div v-else class="pl-4 border-l-2 border-purple-500/30">
-                  <div class="text-white/70 text-sm whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
+                <div v-else class="pl-3 border-l-2 border-purple-500/30">
+                  <div class="text-white/70 text-xs whitespace-pre-wrap max-h-32 overflow-y-auto leading-relaxed">
                     {{ thinkingText || '分析你的需求中...' }}
-                    <span class="inline-block w-2 h-4 bg-purple-400 ml-1 animate-pulse"></span>
+                    <span class="inline-block w-1.5 h-3 bg-purple-400 ml-0.5 animate-pulse"></span>
                   </div>
                 </div>
               </div>
@@ -886,33 +851,31 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
         <!-- 添加到播放列表进度 -->
         <Transition name="fade">
-          <div v-if="searching && thinkingPhase === 'adding'" class="mb-5">
-            <div class="p-5 rounded-2xl bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 backdrop-blur-xl">
-              <div class="flex items-center gap-3 mb-4">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
-                  <svg class="w-5 h-5 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div v-if="searching && thinkingPhase === 'adding'" class="mb-4">
+            <div class="p-4 rounded-xl bg-gradient-to-br from-green-500/10 to-emerald-500/10 border border-green-500/20 backdrop-blur-xl">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-white animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
                   </svg>
                 </div>
                 <div class="flex-1">
-                  <span class="text-white font-medium">正在添加到播放列表</span>
-                  <span class="text-green-300 text-sm ml-2">{{ addingProgress.current }}/{{ addingProgress.total }}</span>
+                  <span class="text-white font-medium text-sm">正在添加到播放列表</span>
+                  <span class="text-green-300 text-xs ml-2">{{ addingProgress.current }}/{{ addingProgress.total }}</span>
                 </div>
-                <div v-if="addingProgress.addedCount > 0" class="px-2 py-1 rounded-full bg-green-500/20 text-green-300 text-xs">
+                <div v-if="addingProgress.addedCount > 0" class="px-2 py-1 rounded-md bg-green-500/20 text-green-300 text-[10px]">
                   已添加 {{ addingProgress.addedCount }} 首
                 </div>
               </div>
-              <div class="flex items-center gap-3 p-3 rounded-xl bg-white/5">
-                <div class="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                  <svg class="w-4 h-4 text-purple-300 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
+              <div class="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                <div class="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                  <svg class="w-3.5 h-3.5 text-purple-300 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
                   </svg>
                 </div>
-                <div class="flex-1 min-w-0">
-                  <p class="text-white text-sm font-medium truncate">{{ addingProgress.currentSong }}</p>
-                </div>
+                <p class="text-white text-xs font-medium truncate flex-1">{{ addingProgress.currentSong }}</p>
               </div>
-              <div class="mt-3 h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div class="mt-2 h-1 bg-white/10 rounded-full overflow-hidden">
                 <div
                   class="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-300 ease-out rounded-full"
                   :style="{ width: `${(addingProgress.current / addingProgress.total) * 100}%` }"
@@ -924,21 +887,17 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
         <!-- AI 推荐确认阶段 -->
         <Transition name="fade">
-          <div v-if="!loading && !searching && thinkingPhase === 'confirming' && recommendations.length > 0" class="mb-5">
-            <!-- AI 主持人卡片 -->
-            <div class="mb-4 p-4 rounded-2xl bg-gradient-to-br from-purple-600/20 via-pink-500/10 to-purple-600/20 border border-purple-500/30 backdrop-blur-xl relative overflow-hidden">
-              <!-- 装饰背景 -->
-              <div class="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl"></div>
-              <div class="absolute bottom-0 left-0 w-24 h-24 bg-pink-500/10 rounded-full blur-2xl"></div>
-              
-              <div class="relative flex items-start gap-4">
+          <div v-if="!loading && !searching && thinkingPhase === 'confirming' && recommendations.length > 0" class="mb-4">
+            <!-- AI 主持人卡片（紧凑版） -->
+            <div class="mb-3 p-3 rounded-xl bg-gradient-to-br from-purple-600/15 via-pink-500/10 to-purple-600/15 border border-purple-500/20 backdrop-blur-xl">
+              <div class="flex items-center gap-3">
                 <!-- 头像 -->
                 <div class="relative flex-shrink-0">
-                  <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 flex items-center justify-center text-2xl shadow-lg shadow-purple-500/30">
+                  <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 via-pink-500 to-rose-500 flex items-center justify-center text-lg shadow-lg shadow-purple-500/30">
                     {{ currentRole.avatar }}
                   </div>
-                  <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-slate-900 flex items-center justify-center">
-                    <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <div class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full border-2 border-slate-900 flex items-center justify-center">
+                    <svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
                     </svg>
                   </div>
@@ -946,33 +905,33 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
                 
                 <!-- 内容 -->
                 <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-2">
-                    <span class="text-white font-semibold text-lg">{{ currentRole.name }}</span>
-                    <span class="px-2.5 py-1 rounded-full bg-gradient-to-r from-green-500/20 to-emerald-500/20 text-green-300 text-xs font-medium border border-green-500/30">
+                  <div class="flex items-center gap-2 mb-0.5">
+                    <span class="text-white font-semibold text-sm">{{ currentRole.name }}</span>
+                    <span class="px-1.5 py-0.5 rounded-md bg-green-500/20 text-green-300 text-[10px] font-medium">
                       🎵 推荐完成
                     </span>
                   </div>
                   <!-- 开场白 -->
-                  <p v-if="aiReason" class="text-white/80 text-sm leading-relaxed">{{ aiReason }}</p>
-                  <p v-else class="text-white/60 text-sm leading-relaxed italic">为你精心挑选了 {{ recommendations.length }} 首歌曲，希望你喜欢~</p>
+                  <p v-if="aiReason" class="text-white/70 text-xs leading-relaxed line-clamp-2">{{ aiReason }}</p>
+                  <p v-else class="text-white/50 text-xs">为你精心挑选了 {{ recommendations.length }} 首歌曲</p>
                 </div>
               </div>
             </div>
             
             <!-- 歌曲列表卡片 -->
-            <div class="rounded-2xl bg-black/40 border border-white/10 backdrop-blur-xl overflow-hidden">
+            <div class="rounded-xl bg-black/40 border border-white/10 backdrop-blur-xl overflow-hidden">
               <!-- 标题栏 -->
-              <div class="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/5">
+              <div class="flex items-center justify-between px-3 py-2.5 border-b border-white/10 bg-white/5">
                 <div class="flex items-center gap-2">
-                  <span class="text-lg">🎧</span>
-                  <span class="text-white font-medium">专属歌单</span>
-                  <span class="text-white/40 text-sm">{{ recommendations.length }} 首</span>
+                  <span class="text-base">🎧</span>
+                  <span class="text-white font-medium text-sm">专属歌单</span>
+                  <span class="text-white/40 text-xs">{{ recommendations.length }} 首</span>
                 </div>
                 <button 
                   @click="toggleSelectAll"
-                  class="text-xs text-purple-300 hover:text-purple-200 transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-white/5"
+                  class="text-[10px] text-purple-300 hover:text-purple-200 transition-colors flex items-center gap-1 px-2 py-1 rounded-md hover:bg-white/5"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
                   </svg>
                   {{ selectedCount === recommendations.length ? '取消全选' : '全选' }}
@@ -980,11 +939,11 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
               </div>
               
               <!-- 分类歌曲列表 -->
-              <div class="max-h-96 overflow-y-auto">
+              <div class="max-h-72 overflow-y-auto">
                 <div v-for="(group, groupIdx) in groupedRecommendations" :key="group.category" class="border-b border-white/5 last:border-b-0">
                   <!-- 分类标题 -->
-                  <div class="sticky top-0 z-10 px-4 py-2.5 bg-gradient-to-r from-purple-900/50 to-pink-900/30 backdrop-blur-sm border-b border-white/5">
-                    <span class="text-white/90 text-sm font-medium">{{ group.category || `🎵 推荐歌曲 ${groupIdx + 1}` }}</span>
+                  <div class="sticky top-0 z-10 px-3 py-2 bg-gradient-to-r from-purple-900/50 to-pink-900/30 backdrop-blur-sm border-b border-white/5">
+                    <span class="text-white/90 text-xs font-medium">{{ group.category || `🎵 推荐歌曲 ${groupIdx + 1}` }}</span>
                   </div>
                   
                   <!-- 歌曲列表 -->
@@ -994,7 +953,7 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
                       :key="(song as any)._index"
                       @click="toggleSongSelection((song as any)._index)"
                       :class="[
-                        'flex items-center gap-3 px-4 py-3 cursor-pointer transition-all duration-200',
+                        'flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-all duration-200',
                         song.selected !== false 
                           ? 'bg-purple-500/10 hover:bg-purple-500/15' 
                           : 'hover:bg-white/5 opacity-50'
@@ -1002,33 +961,33 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
                     >
                       <!-- 勾选框 -->
                       <div :class="[
-                        'w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-all duration-200',
+                        'w-4 h-4 rounded flex items-center justify-center flex-shrink-0 transition-all duration-200',
                         song.selected !== false 
-                          ? 'bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg shadow-purple-500/30' 
+                          ? 'bg-gradient-to-br from-purple-500 to-pink-500 shadow shadow-purple-500/30' 
                           : 'bg-white/10 border border-white/20'
                       ]">
-                        <svg v-if="song.selected !== false" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg v-if="song.selected !== false" class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
                         </svg>
                       </div>
                       
                       <!-- 歌曲信息 -->
                       <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-0.5">
-                          <p :class="['text-sm font-medium truncate', song.selected !== false ? 'text-white' : 'text-white/60']">
+                        <div class="flex items-center gap-1.5">
+                          <p :class="['text-xs font-medium truncate', song.selected !== false ? 'text-white' : 'text-white/60']">
                             {{ song.title }}
                           </p>
-                          <span class="text-white/20 text-xs">•</span>
-                          <p class="text-white/40 text-sm truncate flex-shrink-0">{{ song.artist }}</p>
+                          <span class="text-white/20 text-[10px]">•</span>
+                          <p class="text-white/40 text-xs truncate flex-shrink-0">{{ song.artist }}</p>
                         </div>
-                        <p v-if="song.comment" :class="['text-xs line-clamp-1', song.selected !== false ? 'text-purple-300/70' : 'text-white/30']">
+                        <p v-if="song.comment" :class="['text-[10px] line-clamp-1 mt-0.5', song.selected !== false ? 'text-purple-300/60' : 'text-white/30']">
                           💡 {{ song.comment }}
                         </p>
                       </div>
                       
                       <!-- 音乐图标 -->
-                      <div v-if="song.selected !== false" class="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                        <svg class="w-4 h-4 text-purple-300" fill="currentColor" viewBox="0 0 20 20">
+                      <div v-if="song.selected !== false" class="w-6 h-6 rounded-md bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                        <svg class="w-3 h-3 text-purple-300" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/>
                         </svg>
                       </div>
@@ -1038,19 +997,19 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
               </div>
               
               <!-- 底部操作栏 -->
-              <div class="px-4 py-4 border-t border-white/10 bg-gradient-to-r from-purple-900/30 to-pink-900/20">
+              <div class="px-3 py-3 border-t border-white/10 bg-gradient-to-r from-purple-900/30 to-pink-900/20">
                 <div class="flex items-center gap-2">
                   <button 
                     @click="startSearching"
                     :disabled="selectedCount === 0"
                     :class="[
-                      'flex-1 h-11 rounded-xl text-white text-sm font-medium transition-all duration-300 flex items-center justify-center gap-2',
+                      'flex-1 h-10 rounded-xl text-white text-xs font-medium transition-all duration-300 flex items-center justify-center gap-1.5',
                       selectedCount > 0 
-                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-[1.02]' 
+                        ? 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 shadow-lg shadow-purple-500/30' 
                         : 'bg-white/10 cursor-not-allowed opacity-50'
                     ]"
                   >
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                    <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/>
                     </svg>
                     听听看
@@ -1059,28 +1018,28 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
                     @click="openPlaylistModal"
                     :disabled="selectedCount === 0"
                     :class="[
-                      'h-11 px-4 rounded-xl text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2',
+                      'h-10 px-3 rounded-xl text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5',
                       selectedCount > 0 
-                        ? 'bg-white/10 hover:bg-white/20 text-white hover:scale-105' 
+                        ? 'bg-white/10 hover:bg-white/20 text-white' 
                         : 'bg-white/5 cursor-not-allowed opacity-50 text-white/50'
                     ]"
                   >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                     </svg>
-                    加入歌单
+                    歌单
                   </button>
                   <button 
                     @click="refreshRecommendations"
-                    class="h-11 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all duration-200 flex items-center justify-center gap-2 hover:scale-105"
+                    class="h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium transition-all duration-200 flex items-center justify-center gap-1.5"
                   >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                     </svg>
                     换一批
                   </button>
                 </div>
-                <p class="text-center text-white/30 text-xs mt-2">已选 {{ selectedCount }} 首</p>
+                <p class="text-center text-white/30 text-[10px] mt-1.5">已选 {{ selectedCount }} 首</p>
               </div>
             </div>
           </div>
@@ -1088,7 +1047,7 @@ function useQuickPrompt(prompt: string) { userInput.value = prompt; getRecommend
 
         <!-- 歌单选择弹窗 -->
         <Transition name="fade">
-          <div v-if="showPlaylistModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="showPlaylistModal = false">
+          <div v-if="showPlaylistModal" class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" @click.self="showPlaylistModal = false">
             <div class="w-full max-w-sm bg-slate-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
               <!-- 弹窗标题 -->
               <div class="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-purple-900/30 to-pink-900/20">

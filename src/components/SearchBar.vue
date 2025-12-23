@@ -11,9 +11,9 @@ import {
   searchResultToTrack,
   getLyrics,
   searchSongs,
+  getEnabledSources,
   type SearchResult,
-  type AudioQuality,
-  type MusicSource
+  type AudioQuality
 } from '@/services/source/OnlineApiSource'
 import { scanLocalFiles } from '@/services/source/LocalSource'
 import { processSearchKeyword, isPinyin } from '@/utils/pinyin'
@@ -57,6 +57,8 @@ const showMobileSearch = ref(false)
 const isSelectMode = ref(false)
 const selectedItems = ref<Set<string>>(new Set())
 let longPressTimer: number | null = null
+let touchStartPos = { x: 0, y: 0 }
+let hasMoved = false
 
 // 获取选中项的唯一key
 function getResultKey(result: SearchResult): string {
@@ -64,16 +66,40 @@ function getResultKey(result: SearchResult): string {
 }
 
 // 开始长按
-function startLongPress(result: SearchResult) {
+function startLongPress(result: SearchResult, event: TouchEvent | MouseEvent) {
+  hasMoved = false
+  // 记录起始位置
+  if ('touches' in event) {
+    touchStartPos = { x: event.touches[0].clientX, y: event.touches[0].clientY }
+  } else {
+    touchStartPos = { x: event.clientX, y: event.clientY }
+  }
+  
   longPressTimer = window.setTimeout(() => {
-    // 进入多选模式并选中当前项
-    isSelectMode.value = true
-    selectedItems.value.add(getResultKey(result))
-    // 触发震动反馈（如果支持）
-    if (navigator.vibrate) {
-      navigator.vibrate(50)
+    if (!hasMoved) {
+      // 进入多选模式并选中当前项
+      isSelectMode.value = true
+      selectedItems.value.add(getResultKey(result))
+      // 触发震动反馈（如果支持）
+      if (navigator.vibrate) {
+        navigator.vibrate(50)
+      }
     }
   }, 500)
+}
+
+// 检测移动（用于区分滚动和长按）
+function handleTouchMove(event: TouchEvent) {
+  if (longPressTimer) {
+    const touch = event.touches[0]
+    const deltaX = Math.abs(touch.clientX - touchStartPos.x)
+    const deltaY = Math.abs(touch.clientY - touchStartPos.y)
+    // 移动超过10px则认为是滚动，取消长按
+    if (deltaX > 10 || deltaY > 10) {
+      hasMoved = true
+      cancelLongPress()
+    }
+  }
 }
 
 // 取消长按
@@ -226,7 +252,7 @@ async function handleAiSearch(query: string) {
       aiResponse.value = result.reason || `为你找到 ${result.songs.length} 首推荐`
 
       // 搜索 AI 推荐的歌曲
-      const sources: MusicSource[] = ['netease', 'kuwo', 'kugou']
+      const sources = getEnabledSources()
       for (const song of result.songs.slice(0, 5)) {
         for (const source of sources) {
           try {
@@ -272,8 +298,15 @@ async function addToPlaylist(result: SearchResult) {
     if (t) t.lrc = lrc
   })
   store.addTrack(track)
-  showResults.value = false
+  // 添加视觉反馈：短暂显示成功提示
+  addedFeedback.value = getResultKey(result)
+  setTimeout(() => {
+    addedFeedback.value = ''
+  }, 1000)
 }
+
+// 添加成功反馈
+const addedFeedback = ref('')
 
 async function playNow(result: SearchResult) {
   const track = searchResultToTrack(result, quality.value)
@@ -483,71 +516,113 @@ function getPlatformIcon(platform: string) {
     <Transition name="modal">
       <div 
         v-if="showMobileSearch"
-        class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end md:items-center justify-center"
+        class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center"
         @click.self="showMobileSearch = false"
       >
-        <!-- 搜索面板（移动端底部弹出，桌面端居中卡片） -->
-        <div class="w-full md:w-[560px] md:max-w-[90vw] max-h-[85vh] md:max-h-[80vh] bg-neutral-900/95 backdrop-blur-xl rounded-t-3xl md:rounded-3xl flex flex-col overflow-hidden md:shadow-2xl md:border md:border-white/10">
-          <!-- 拖动指示条（移动端显示）/ 标题（桌面端显示） -->
-          <div class="flex justify-center pt-3 pb-2 md:hidden">
-            <div class="w-10 h-1 rounded-full bg-white/20"></div>
-          </div>
-          <div class="hidden md:flex items-center justify-between px-5 pt-4 pb-2">
-            <h3 class="text-white font-bold text-lg">搜索音乐</h3>
-            <button 
-              @click="showMobileSearch = false"
-              class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 transition-colors"
-            >
-              ✕
-            </button>
+        <!-- 搜索面板 -->
+        <div class="w-full md:w-[520px] md:max-w-[90vw] max-h-[90vh] md:max-h-[85vh] bg-gradient-to-b from-neutral-900 to-neutral-950 backdrop-blur-xl rounded-t-[28px] md:rounded-[28px] flex flex-col overflow-hidden md:shadow-2xl border-t border-white/10 md:border md:border-white/10">
+          
+          <!-- 顶部区域：拖动条 + AI状态 -->
+          <div class="relative">
+            <!-- 拖动指示条（移动端） -->
+            <div class="flex justify-center pt-2.5 pb-1 md:hidden">
+              <div class="w-9 h-1 rounded-full bg-white/25"></div>
+            </div>
+            
+            <!-- AI 状态区域（顶部统一显示，包括思考中和结果） -->
+            <Transition name="ai-status">
+              <div 
+                v-if="searchMode === 'ai' && aiResponse"
+                class="px-4 py-3 bg-gradient-to-r from-purple-600/20 via-purple-500/10 to-transparent"
+              >
+                <div class="flex items-center gap-3">
+                  <div class="relative flex-shrink-0">
+                    <div class="w-8 h-8 rounded-full bg-purple-600/30 flex items-center justify-center">
+                      <span class="text-base">✨</span>
+                    </div>
+                    <div v-if="loading" class="absolute inset-0 rounded-full border-2 border-purple-400 border-t-transparent animate-spin"></div>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-white/90 text-sm font-medium leading-relaxed">{{ aiResponse }}</p>
+                    <p v-if="loading && thinkingText" class="text-white/50 text-xs mt-0.5 truncate">{{ thinkingText }}</p>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+            
+            <!-- 桌面端标题栏 -->
+            <div class="hidden md:flex items-center justify-between px-5 pt-4 pb-2">
+              <h3 class="text-white font-semibold text-lg">搜索音乐</h3>
+              <button 
+                @click="showMobileSearch = false"
+                class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 transition-all hover:rotate-90"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
           </div>
           
           <!-- 搜索栏 -->
-          <div class="px-4 pb-3">
-            <!-- 搜索模式切换（移动端） -->
-            <div class="flex rounded-2xl bg-white/10 p-1 mb-3">
+          <div class="px-4 pt-2 pb-3">
+            <!-- 搜索模式切换 -->
+            <div class="flex rounded-2xl bg-white/5 p-1 mb-3">
               <button
                 @click="searchMode = 'normal'"
                 :class="[
-                  'flex-1 py-2 rounded-xl text-sm transition-all',
-                  searchMode === 'normal' ? 'bg-white/20 text-white' : 'text-white/50'
+                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
+                  searchMode === 'normal' 
+                    ? 'bg-white/15 text-white shadow-sm' 
+                    : 'text-white/50 hover:text-white/70'
                 ]"
               >
-                普通搜索
+                🔍 普通搜索
               </button>
               <button
                 @click="searchMode = 'ai'"
                 :class="[
-                  'flex-1 py-2 rounded-xl text-sm transition-all flex items-center justify-center gap-1',
-                  searchMode === 'ai' ? 'bg-purple-600 text-white' : 'text-white/50'
+                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
+                  searchMode === 'ai' 
+                    ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-lg shadow-purple-500/25' 
+                    : 'text-white/50 hover:text-white/70'
                 ]"
               >
-                <span>✨</span> AI 搜索
+                ✨ AI 搜索
               </button>
             </div>
 
-            <div class="flex items-center gap-2">
-              <div class="flex-1 relative">
+            <!-- 搜索输入框 -->
+            <div class="flex items-center gap-2.5">
+              <div class="flex-1 relative group">
                 <input
                   ref="mobileSearchInput"
                   v-model="keyword"
                   @keyup.enter="handleSearch"
                   type="text"
                   :placeholder="searchMode === 'ai' ? '描述你想听的音乐...' : '搜索歌曲、歌手...'"
-                  class="w-full h-12 pl-11 pr-4 rounded-2xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 text-base"
+                  class="w-full h-12 pl-4 pr-4 rounded-2xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 focus:ring-2 focus:ring-purple-500/30 text-base transition-all"
                   autofocus
                 />
-                <span class="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 text-lg">{{ searchMode === 'ai' ? '✨' : '🔍' }}</span>
               </div>
               <button
                 @click="handleSearch"
-                :disabled="loading"
-                class="h-12 px-5 rounded-2xl bg-purple-600 text-white font-medium disabled:opacity-50 active:scale-95 transition-transform"
+                :disabled="loading || !keyword.trim()"
+                :class="[
+                  'h-12 w-12 rounded-2xl flex items-center justify-center transition-all',
+                  keyword.trim() 
+                    ? 'bg-purple-600 text-white active:scale-95 shadow-lg shadow-purple-500/30' 
+                    : 'bg-white/10 text-white/30'
+                ]"
               >
-                {{ loading ? '...' : '搜索' }}
+                <svg v-if="!loading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <div v-else class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               </button>
             </div>
-            <!-- 简拼提示（移动端） -->
+            
+            <!-- 简拼提示 -->
             <Transition name="hint">
               <div
                 v-if="pinyinHint && searchMode === 'normal'"
@@ -556,31 +631,36 @@ function getPlatformIcon(platform: string) {
                 将搜索: {{ pinyinHint }}
               </div>
             </Transition>
-            <!-- AI 快捷提示（移动端） -->
-            <div v-if="searchMode === 'ai' && !loading" class="mt-3">
-              <p class="text-white/40 text-xs mb-2">快捷提示:</p>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  v-for="p in quickPrompts"
-                  :key="p.label"
-                  @click="useQuickPrompt(p.prompt)"
-                  class="px-3 py-1.5 rounded-xl bg-white/10 active:bg-white/20 text-white/70 text-sm transition-all"
-                >
-                  {{ p.icon }} {{ p.label }}
-                </button>
+            
+            <!-- AI 快捷提示 -->
+            <Transition name="hint">
+              <div v-if="searchMode === 'ai' && !loading && !searchResults.length" class="mt-3">
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="p in quickPrompts"
+                    :key="p.label"
+                    @click="useQuickPrompt(p.prompt)"
+                    class="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-white/15 text-white/70 text-sm transition-all border border-white/5"
+                  >
+                    {{ p.icon }} {{ p.label }}
+                  </button>
+                </div>
               </div>
-            </div>
-            <!-- 音质选择 -->
+            </Transition>
+            
+            <!-- 音质选择（更紧凑） -->
             <div class="flex items-center gap-2 mt-3">
-              <span class="text-white/40 text-xs">音质:</span>
-              <div class="flex gap-1.5 flex-wrap">
+              <span class="text-white/40 text-xs">音质</span>
+              <div class="flex gap-1">
                 <button
                   v-for="q in qualities"
                   :key="q.value"
                   @click="quality = q.value"
                   :class="[
-                    'px-3 py-1.5 rounded-full text-xs transition-all active:scale-95',
-                    quality === q.value ? 'bg-purple-600 text-white' : 'bg-white/10 text-white/60'
+                    'px-2.5 py-1 rounded-lg text-xs transition-all',
+                    quality === q.value 
+                      ? 'bg-purple-600/80 text-white' 
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'
                   ]"
                 >
                   {{ q.label }}
@@ -590,92 +670,124 @@ function getPlatformIcon(platform: string) {
           </div>
 
           <!-- 搜索结果 -->
-          <div class="flex-1 overflow-y-auto px-4 pb-6 min-h-[200px] max-h-[60vh]">
-            <div v-if="loading" class="flex items-center justify-center py-16">
-              <div class="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+          <div class="flex-1 overflow-y-auto min-h-[180px] max-h-[55vh]">
+            <!-- 加载状态 -->
+            <div v-if="loading && searchMode !== 'ai'" class="flex flex-col items-center justify-center py-16">
+              <div class="w-10 h-10 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+              <p class="text-white/40 text-sm mt-3">搜索中...</p>
             </div>
-            <!-- AI 回复提示（移动端） -->
-            <div v-if="aiResponse" class="mb-3 px-3 py-2 rounded-xl bg-purple-600/20">
-              <div class="flex items-center gap-2">
-                <span class="text-purple-400">✨</span>
-                <span class="text-white/80 text-sm">{{ aiResponse }}</span>
+            
+            <!-- AI 搜索加载状态 -->
+            <div v-if="loading && searchMode === 'ai' && searchResults.length === 0" class="flex flex-col items-center justify-center py-16">
+              <div class="w-10 h-10 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+              <p class="text-white/40 text-sm mt-3">正在搜索歌曲资源...</p>
+            </div>
+            
+            <!-- 空状态 -->
+            <div v-if="!loading && searchResults.length === 0 && !aiResponse" class="flex flex-col items-center justify-center py-12 text-white/40">
+              <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
+                <span class="text-3xl">{{ searchMode === 'ai' ? '✨' : '🎵' }}</span>
               </div>
-              <div v-if="loading && thinkingText" class="mt-1 text-white/50 text-xs line-clamp-2">
-                {{ thinkingText }}
-              </div>
+              <p class="text-sm">{{ searchMode === 'ai' ? '描述你的心情或场景' : '输入关键词搜索歌曲' }}</p>
+              <p class="text-xs text-white/30 mt-1">长按歌曲可多选</p>
             </div>
-            <div v-if="!loading && searchResults.length === 0 && !aiResponse" class="text-center py-16 text-white/40">
-              <div class="text-4xl mb-3">{{ searchMode === 'ai' ? '✨' : '🎵' }}</div>
-              <p>{{ searchMode === 'ai' ? '描述你的心情或场景' : '输入关键词搜索歌曲' }}</p>
-            </div>
-            <div v-else class="space-y-1">
-              <!-- 多选模式提示 -->
-              <div v-if="isSelectMode" class="flex items-center justify-between px-2 py-2 mb-2">
-                <span class="text-white/60 text-sm">已选 {{ selectedItems.size }} 首</span>
+            
+            <!-- 搜索结果列表 -->
+            <div v-if="searchResults.length > 0" class="px-3 pb-4">
+              <!-- 多选模式提示栏 -->
+              <div v-if="isSelectMode" class="flex items-center justify-between px-3 py-2.5 mb-2 rounded-xl bg-purple-600/10 border border-purple-500/20">
+                <span class="text-white/70 text-sm">已选 <span class="text-purple-400 font-medium">{{ selectedItems.size }}</span> 首</span>
                 <button 
                   @click="toggleSelectAll"
-                  class="text-purple-400 text-sm"
+                  class="text-purple-400 text-sm font-medium"
                 >
                   {{ selectedItems.size === searchResults.length ? '取消全选' : '全选' }}
                 </button>
               </div>
               
-              <div
-                v-for="result in searchResults"
-                :key="getResultKey(result)"
-                :class="[
-                  'flex items-center gap-3 p-3 rounded-2xl transition-all',
-                  isSelectMode && selectedItems.has(getResultKey(result)) 
-                    ? 'bg-purple-600/20 border border-purple-500/30' 
-                    : 'active:bg-white/10 border border-transparent'
-                ]"
-                @click="handleResultClick(result)"
-                @mousedown="startLongPress(result)"
-                @mouseup="cancelLongPress"
-                @mouseleave="cancelLongPress"
-                @touchstart="startLongPress(result)"
-                @touchend="cancelLongPress"
-                @touchcancel="cancelLongPress"
-              >
-                <!-- 多选复选框 -->
-                <div 
-                  v-if="isSelectMode"
+              <!-- 结果数量提示 -->
+              <div v-if="!isSelectMode && searchResults.length > 0" class="px-2 py-1.5 mb-2">
+                <span class="text-white/40 text-xs">找到 {{ searchResults.length }} 首歌曲</span>
+              </div>
+              
+              <!-- 歌曲列表 -->
+              <div class="space-y-1">
+                <div
+                  v-for="(result, index) in searchResults"
+                  :key="getResultKey(result)"
                   :class="[
-                    'w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
-                    selectedItems.has(getResultKey(result))
-                      ? 'bg-purple-600 border-purple-600'
-                      : 'border-white/30'
+                    'flex items-center gap-3 p-3 rounded-2xl transition-all',
+                    isSelectMode && selectedItems.has(getResultKey(result)) 
+                      ? 'bg-purple-600/20 border border-purple-500/30' 
+                      : 'hover:bg-white/5 active:bg-white/10 border border-transparent'
                   ]"
+                  @click="handleResultClick(result)"
+                  @mousedown="startLongPress(result, $event)"
+                  @mouseup="cancelLongPress"
+                  @mouseleave="cancelLongPress"
+                  @touchstart.passive="startLongPress(result, $event)"
+                  @touchmove.passive="handleTouchMove"
+                  @touchend="cancelLongPress"
+                  @touchcancel="cancelLongPress"
                 >
-                  <svg v-if="selectedItems.has(getResultKey(result))" class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                  </svg>
+                  <!-- 多选复选框 -->
+                  <div 
+                    v-if="isSelectMode"
+                    :class="[
+                      'w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                      selectedItems.has(getResultKey(result))
+                        ? 'bg-purple-600 border-purple-600'
+                        : 'border-white/30'
+                    ]"
+                  >
+                    <svg v-if="selectedItems.has(getResultKey(result))" class="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                  </div>
+                  
+                  <!-- 序号/平台图标 -->
+                  <div v-if="!isSelectMode" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm flex-shrink-0">
+                    <span class="text-white/40">{{ index + 1 }}</span>
+                  </div>
+                  
+                  <!-- 歌曲信息 -->
+                  <div class="flex-1 min-w-0">
+                    <p class="text-white text-sm font-medium truncate">{{ result.name }}</p>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="text-white/50 text-xs truncate">{{ result.artist }}</span>
+                      <span class="text-white/30 text-[10px]">{{ getPlatformIcon(result.platform) }}</span>
+                    </div>
+                  </div>
+                  
+                  <!-- 添加按钮 -->
+                  <button
+                    v-if="!isSelectMode"
+                    @click.stop="addToPlaylist(result)"
+                    :class="[
+                      'w-9 h-9 rounded-xl flex items-center justify-center transition-all',
+                      addedFeedback === getResultKey(result)
+                        ? 'bg-green-500 text-white scale-110'
+                        : 'bg-white/10 text-white/60 hover:bg-purple-600 hover:text-white active:scale-95'
+                    ]"
+                  >
+                    <svg v-if="addedFeedback === getResultKey(result)" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                    </svg>
+                  </button>
                 </div>
-                
-                <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-lg flex-shrink-0">
-                  {{ getPlatformIcon(result.platform) }}
-                </div>
-                <div class="flex-1 min-w-0">
-                  <p class="text-white text-sm truncate">{{ result.name }}</p>
-                  <p class="text-white/50 text-xs truncate">{{ result.artist }}</p>
-                </div>
-                <button
-                  v-if="!isSelectMode"
-                  @click.stop="addToPlaylist(result)"
-                  class="w-9 h-9 rounded-xl bg-white/10 text-white/70 flex items-center justify-center active:scale-95 transition-transform"
-                >
-                  +
-                </button>
               </div>
             </div>
           </div>
           
-          <!-- 批量操作栏（多选模式时显示） -->
-          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-4 pt-2 border-t border-white/10 bg-neutral-900/95">
+          <!-- 批量操作栏（多选模式） -->
+          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-4 pt-3 border-t border-white/5 bg-neutral-900/95">
             <div class="flex gap-2">
               <button
                 @click="batchAddToPlaylist"
-                class="flex-1 h-11 rounded-xl bg-purple-600 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                class="flex-1 h-12 rounded-2xl bg-purple-600 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-purple-500/20"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
@@ -684,30 +796,52 @@ function getPlatformIcon(platform: string) {
               </button>
               <button
                 @click="batchAddToFavorite"
-                class="flex-1 h-11 rounded-xl bg-pink-600 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                class="flex-1 h-12 rounded-2xl bg-gradient-to-r from-pink-600 to-rose-500 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-pink-500/20"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
                 </svg>
-                添加喜欢
+                收藏
               </button>
               <button
                 @click="exitSelectMode"
-                class="w-11 h-11 rounded-xl bg-white/10 text-white/60 flex items-center justify-center active:scale-95 transition-transform"
+                class="w-12 h-12 rounded-2xl bg-white/10 text-white/60 flex items-center justify-center active:scale-95 transition-all"
               >
-                ✕
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
               </button>
             </div>
           </div>
           
-          <!-- 关闭按钮（移动端显示，非多选模式） -->
-          <div v-else class="md:hidden px-4 pb-6 pt-2 border-t border-white/5">
-            <button
-              @click="showMobileSearch = false"
-              class="w-full h-12 rounded-2xl bg-white/10 text-white/60 font-medium active:scale-[0.98] transition-transform"
-            >
-              关闭
-            </button>
+          <!-- 底部操作栏（非多选模式） -->
+          <div v-else class="px-4 pb-5 pt-2 border-t border-white/5">
+            <div class="flex gap-2">
+              <!-- 换一批按钮 -->
+              <button
+                v-if="searchResults.length > 0 && !loading"
+                @click="handleSearch"
+                class="flex-1 h-11 rounded-2xl bg-white/5 hover:bg-white/10 text-white/60 font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all border border-white/5"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                换一批
+              </button>
+              <!-- 关闭按钮 -->
+              <button
+                @click="showMobileSearch = false"
+                :class="[
+                  'h-11 rounded-2xl bg-white/10 text-white/60 font-medium active:scale-[0.98] transition-all',
+                  searchResults.length > 0 && !loading ? 'w-11 flex items-center justify-center' : 'flex-1'
+                ]"
+              >
+                <svg v-if="searchResults.length > 0 && !loading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                <span v-else>关闭</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -767,5 +901,21 @@ function getPlatformIcon(platform: string) {
 .hint-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+/* AI 状态动画 */
+.ai-status-enter-active {
+  transition: all 0.3s ease-out;
+}
+.ai-status-leave-active {
+  transition: all 0.2s ease-in;
+}
+.ai-status-enter-from {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.ai-status-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>

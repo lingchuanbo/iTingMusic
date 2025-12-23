@@ -24,6 +24,14 @@ const defaultConfigs: Record<string, Partial<AIConfig>> = {
   }
 }
 
+// 内置默认 AI 配置
+const BUILTIN_AI_CONFIG: AIConfig = {
+  provider: 'custom',
+  apiKey: 'ak_1bx0ge7Cp8Zg7NU3WN5TT2OF8F782',
+  baseUrl: 'https://api.longcat.chat/openai/v1',
+  model: 'LongCat-Flash-Chat'
+}
+
 // 加载配置
 export function loadAIConfig(): AIConfig {
   try {
@@ -32,17 +40,19 @@ export function loadAIConfig(): AIConfig {
       return JSON.parse(data)
     }
   } catch {}
-  return {
-    provider: 'openai',
-    apiKey: '',
-    baseUrl: defaultConfigs.openai.baseUrl!,
-    model: defaultConfigs.openai.model!
-  }
+  // 返回内置默认配置
+  return { ...BUILTIN_AI_CONFIG }
 }
 
 // 保存配置
 export function saveAIConfig(config: AIConfig) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+}
+
+// 重置为内置默认配置
+export function resetToBuiltinConfig() {
+  localStorage.removeItem(STORAGE_KEY)
+  return { ...BUILTIN_AI_CONFIG }
 }
 
 // 获取默认配置
