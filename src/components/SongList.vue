@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
+import { setSelectMode } from '@/store/ui'
 import { formatTime } from '@/utils/formatTime'
 import { trackStorage } from '@/services/TrackStorage'
 
@@ -23,6 +24,9 @@ const viewMode = ref<ViewMode>(isMobile && savedMode === 'compact' ? 'list' : sa
 const isSelectMode = ref(false)
 const selectedIndexes = ref<Set<number>>(new Set())
 let longPressTimer: number | null = null
+
+// 同步多选状态到全局
+watch(isSelectMode, (val) => setSelectMode(val))
 
 // 长按开始
 function handleLongPressStart(index: number) {
@@ -117,6 +121,37 @@ function batchPlay() {
     store.playTrack(indexes[0])
   }
   exitSelectMode()
+}
+
+// 歌单选择弹窗（批量添加）
+const showPlaylistPicker = ref(false)
+const newPlaylistName = ref('')
+
+// 打开歌单选择弹窗（批量）
+function openPlaylistPicker() {
+  if (selectedIndexes.value.size === 0) return
+  showPlaylistPicker.value = true
+}
+
+// 批量添加到指定歌单
+function batchAddToPlaylist(playlistId: string) {
+  selectedIndexes.value.forEach(idx => {
+    const track = store.playlist[idx]
+    if (track) {
+      trackStorage.saveTrack(track)
+      playlistStore.addToPlaylist(playlistId, track.id)
+    }
+  })
+  showPlaylistPicker.value = false
+  exitSelectMode()
+}
+
+// 创建新歌单并批量添加
+function createAndAddToPlaylist() {
+  if (!newPlaylistName.value.trim()) return
+  const playlist = playlistStore.createPlaylist(newPlaylistName.value.trim())
+  batchAddToPlaylist(playlist.id)
+  newPlaylistName.value = ''
 }
 
 const selectedCount = computed(() => selectedIndexes.value.size)
@@ -238,27 +273,52 @@ function createAndAdd() {
       </div>
     </div>
 
-    <!-- 多选操作栏 -->
-    <div v-if="isSelectMode" class="flex items-center justify-between mb-4 p-3 rounded-xl bg-purple-600/20 border border-purple-500/30">
-      <div class="flex items-center gap-2 flex-shrink-0">
-        <button @click="exitSelectMode" class="text-white/60 hover:text-white">✕</button>
-        <span class="text-white text-sm whitespace-nowrap">已选 {{ selectedCount }}</span>
+    <!-- 多选操作栏 - 底部悬浮 -->
+    <Transition name="slide-up">
+      <div v-if="isSelectMode" class="fixed bottom-4 left-0 right-0 z-40 px-4 safe-area-bottom">
+        <div class="max-w-xl mx-auto rounded-2xl bg-neutral-900/98 backdrop-blur-xl border border-white/10 shadow-2xl overflow-hidden">
+          <!-- 顶部信息栏 -->
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
+            <div class="flex items-center gap-3">
+              <button @click="exitSelectMode" class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/20 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+              <span class="text-white font-medium">已选 <span class="text-purple-400">{{ selectedCount }}</span> 首</span>
+            </div>
+            <button @click="toggleSelectAll" class="text-purple-400 text-sm hover:text-purple-300 transition-colors">
+              {{ selectedIndexes.size === store.playlist.length ? '取消全选' : '全选' }}
+            </button>
+          </div>
+          <!-- 操作按钮 -->
+          <div class="flex items-center justify-around py-3 px-2">
+            <button @click="batchPlay" :disabled="selectedCount === 0" class="flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+              <div class="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center group-hover:bg-purple-500 transition-colors">
+                <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </div>
+              <span class="text-white/70 text-xs">播放</span>
+            </button>
+            <button @click="batchAddToFavorite" :disabled="selectedCount === 0" class="flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+              <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-pink-600/20 transition-colors">
+                <svg class="w-5 h-5 text-pink-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+              </div>
+              <span class="text-white/70 text-xs">喜欢</span>
+            </button>
+            <button @click="openPlaylistPicker" :disabled="selectedCount === 0" class="flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+              <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-blue-600/20 transition-colors">
+                <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              </div>
+              <span class="text-white/70 text-xs">歌单</span>
+            </button>
+            <button @click="batchRemove" :disabled="selectedCount === 0" class="flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+              <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-red-600/20 transition-colors">
+                <svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+              </div>
+              <span class="text-white/70 text-xs">移除</span>
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-        <button @click="toggleSelectAll" class="px-2 md:px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs md:text-sm hover:bg-white/20 whitespace-nowrap">
-          {{ selectedIndexes.size === store.playlist.length ? '取消全选' : '全选' }}
-        </button>
-        <button @click="batchPlay" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs md:text-sm hover:bg-purple-500 disabled:opacity-50 whitespace-nowrap">
-          播放
-        </button>
-        <button @click="batchAddToFavorite" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs md:text-sm hover:bg-white/20 disabled:opacity-50 whitespace-nowrap">
-          喜欢
-        </button>
-        <button @click="batchRemove" :disabled="selectedCount === 0" class="px-2 md:px-3 py-1.5 rounded-lg bg-red-600/80 text-white text-xs md:text-sm hover:bg-red-500 disabled:opacity-50 whitespace-nowrap">
-          移除
-        </button>
-      </div>
-    </div>
+    </Transition>
 
     <!-- 空状态 -->
     <div v-if="store.playlist.length === 0" class="text-white/50 text-center py-20">
@@ -305,16 +365,23 @@ function createAndAdd() {
           <p class="text-white font-medium truncate">{{ track.title }}</p>
           <p class="text-white/50 text-sm truncate">{{ track.artist }}</p>
         </div>
-        <template v-if="!isSelectMode">
-          <button @click.stop="openAddToPlaylist(track.id)" class="opacity-0 group-hover:opacity-100 transition-opacity" title="添加到歌单">
-            ➕
-          </button>
-          <button :key="favoritesKey" @click.stop="toggleFavorite(track.id)" class="opacity-0 group-hover:opacity-100 transition-opacity">
-            {{ isFavorite(track.id) ? '❤️' : '🤍' }}
-          </button>
-          <button @click.stop="removeTrack(index)" class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-red-400 transition-all">✕</button>
-        </template>
         <span class="text-white/40 text-sm">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+        <!-- 更多操作按钮（长按进入多选） -->
+        <button
+          v-if="!isSelectMode"
+          @click.stop
+          @mousedown="handleLongPressStart(index)"
+          @mouseup="handleLongPressEnd"
+          @mouseleave="handleLongPressEnd"
+          @touchstart.passive="handleLongPressStart(index)"
+          @touchend="handleLongPressEnd"
+          @touchcancel="handleLongPressEnd"
+          class="w-8 h-8 flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/10 rounded-lg transition-colors"
+        >
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -401,14 +468,23 @@ function createAndAdd() {
         <span v-else-if="!isSelectMode" class="w-3"></span>
         <span class="flex-1 text-white text-sm truncate">{{ track.title }}</span>
         <span class="text-white/40 text-sm truncate max-w-32">{{ track.artist }}</span>
-        <template v-if="!isSelectMode">
-          <button @click.stop="openAddToPlaylist(track.id)" class="opacity-0 group-hover:opacity-100 text-xs transition-opacity" title="添加到歌单">➕</button>
-          <button :key="favoritesKey" @click.stop="toggleFavorite(track.id)" class="opacity-0 group-hover:opacity-100 text-xs transition-opacity">
-            {{ isFavorite(track.id) ? '❤️' : '🤍' }}
-          </button>
-          <button @click.stop="removeTrack(index)" class="opacity-0 group-hover:opacity-100 text-white/30 hover:text-red-400 text-xs transition-all">✕</button>
-        </template>
         <span class="text-white/30 text-xs w-10 text-right">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+        <!-- 更多操作按钮（长按进入多选） -->
+        <button
+          v-if="!isSelectMode"
+          @click.stop
+          @mousedown="handleLongPressStart(index)"
+          @mouseup="handleLongPressEnd"
+          @mouseleave="handleLongPressEnd"
+          @touchstart.passive="handleLongPressStart(index)"
+          @touchend="handleLongPressEnd"
+          @touchcancel="handleLongPressEnd"
+          class="w-6 h-6 flex items-center justify-center text-white/40 hover:text-white/70 hover:bg-white/10 rounded transition-colors"
+        >
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -458,6 +534,73 @@ function createAndAdd() {
         </div>
       </div>
     </Transition>
+
+    <!-- 批量添加到歌单弹窗 -->
+    <Transition name="fade">
+      <div 
+        v-if="showPlaylistPicker"
+        class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+        @click.self="showPlaylistPicker = false"
+      >
+        <div class="w-full max-w-sm bg-neutral-900 rounded-2xl overflow-hidden">
+          <div class="p-4 border-b border-white/10">
+            <h3 class="text-white font-bold text-lg">选择歌单</h3>
+            <p class="text-white/50 text-sm">将 {{ selectedCount }} 首歌曲添加到歌单</p>
+          </div>
+          
+          <!-- 创建新歌单 -->
+          <div class="p-3 border-b border-white/10">
+            <div class="flex gap-2">
+              <input
+                v-model="newPlaylistName"
+                type="text"
+                placeholder="新建歌单..."
+                class="flex-1 h-10 px-3 rounded-lg bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15"
+                @keyup.enter="createAndAddToPlaylist"
+              />
+              <button
+                @click="createAndAddToPlaylist"
+                :disabled="!newPlaylistName.trim()"
+                class="px-4 rounded-lg bg-purple-600 text-white text-sm hover:bg-purple-500 disabled:opacity-50"
+              >
+                创建
+              </button>
+            </div>
+          </div>
+          
+          <!-- 歌单列表 -->
+          <div class="max-h-60 overflow-y-auto">
+            <div v-if="playlistStore.playlists.length === 0" class="p-6 text-center text-white/40">
+              暂无歌单，请先创建
+            </div>
+            <button
+              v-for="pl in playlistStore.playlists"
+              :key="pl.id"
+              @click="batchAddToPlaylist(pl.id)"
+              class="w-full flex items-center gap-3 p-3 hover:bg-white/10 transition-colors"
+            >
+              <div class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center text-lg">
+                📁
+              </div>
+              <div class="flex-1 text-left">
+                <p class="text-white">{{ pl.name }}</p>
+                <p class="text-white/50 text-xs">{{ pl.trackIds.length }} 首歌曲</p>
+              </div>
+            </button>
+          </div>
+          
+          <!-- 关闭按钮 -->
+          <div class="p-3 border-t border-white/10">
+            <button
+              @click="showPlaylistPicker = false"
+              class="w-full h-10 rounded-lg bg-white/10 text-white/60 hover:bg-white/20"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -469,5 +612,21 @@ function createAndAdd() {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 底部滑入动画 */
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.3s ease;
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+/* 安全区域底部 */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 </style>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isSelectMode } from '@/store/ui'
+
 defineProps<{
   activeView: string
 }>()
@@ -61,7 +63,8 @@ function handleNav(id: string) {
 </script>
 
 <template>
-  <aside class="w-20 h-full flex flex-col items-center py-4 bg-black/20 backdrop-blur-xl border-r border-white/5">
+  <Transition name="sidebar">
+    <aside v-if="!isSelectMode" class="w-20 h-full flex flex-col items-center py-4 bg-black/20 backdrop-blur-xl border-r border-white/5">
     <nav class="flex flex-col gap-2 w-full px-3 overflow-y-auto">
       <button
         v-for="item in navItems"
@@ -93,5 +96,19 @@ function handleNav(id: string) {
         ></div>
       </button>
     </nav>
-  </aside>
+    </aside>
+  </Transition>
 </template>
+
+<style scoped>
+/* 侧边栏隐藏/显示动画 */
+.sidebar-enter-active,
+.sidebar-leave-active {
+  transition: all 0.3s ease;
+}
+.sidebar-enter-from,
+.sidebar-leave-to {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+</style>

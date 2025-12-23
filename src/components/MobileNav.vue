@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isSelectMode, isModalOpen } from '@/store/ui'
+
 defineProps<{
   activeView: string
 }>()
@@ -37,34 +39,47 @@ const navItems = [
 </script>
 
 <template>
-  <nav class="fixed bottom-0 left-0 right-0 z-40 bg-black/95 backdrop-blur-xl border-t border-white/10 safe-area-pb">
-    <div class="flex justify-around items-center h-14">
-      <button
-        v-for="item in navItems"
-        :key="item.id"
-        @click="emit('navigate', item.id)"
-        :class="[
-          'flex flex-col items-center justify-center gap-0.5 px-3 py-1 transition-colors',
-          activeView === item.id ? 'text-purple-400' : 'text-white/50'
-        ]"
-      >
-        <svg 
-          xmlns="http://www.w3.org/2000/svg" 
-          class="w-5 h-5" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
+  <Transition name="mobile-nav">
+    <nav v-if="!isSelectMode && !isModalOpen" class="fixed bottom-0 left-0 right-0 z-40 bg-black/95 backdrop-blur-xl border-t border-white/10 safe-area-pb">
+      <div class="flex justify-around items-center h-14">
+        <button
+          v-for="item in navItems"
+          :key="item.id"
+          @click="emit('navigate', item.id)"
+          :class="[
+            'flex flex-col items-center justify-center gap-0.5 px-3 py-1 transition-colors',
+            activeView === item.id ? 'text-purple-400' : 'text-white/50'
+          ]"
         >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" :d="item.path" />
-        </svg>
-        <span class="text-[10px]">{{ item.label }}</span>
-      </button>
-    </div>
-  </nav>
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            class="w-5 h-5" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" :d="item.path" />
+          </svg>
+          <span class="text-[10px]">{{ item.label }}</span>
+        </button>
+      </div>
+    </nav>
+  </Transition>
 </template>
 
 <style scoped>
 .safe-area-pb {
   padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 底部导航隐藏/显示动画 */
+.mobile-nav-enter-active,
+.mobile-nav-leave-active {
+  transition: all 0.3s ease;
+}
+.mobile-nav-enter-from,
+.mobile-nav-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
 }
 </style>

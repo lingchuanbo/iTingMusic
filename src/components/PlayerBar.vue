@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
+import { isSelectMode, isModalOpen } from '@/store/ui'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
@@ -89,10 +90,12 @@ function clearPlaylist() {
 </script>
 
 <template>
-  <!-- 简洁播放条 - 移动端在底部导航上方 -->
-  <div
-    class="fixed left-0 right-0 z-50 bg-zinc-900/98 backdrop-blur-xl border-t border-white/10 mobile-player-bar md:bottom-0"
-  >
+  <!-- 简洁播放条 - 移动端在底部导航上方，多选模式时隐藏 -->
+  <Transition name="player-bar">
+    <div
+      v-if="!isSelectMode && !isModalOpen"
+      class="fixed left-0 right-0 z-50 bg-zinc-900/98 backdrop-blur-xl border-t border-white/10 mobile-player-bar md:bottom-0"
+    >
     <!-- 进度条（顶部极细线） -->
     <div class="h-0.5 bg-black/5 dark:bg-white/10 relative">
       <template v-if="store.currentTrack">
@@ -289,11 +292,12 @@ function clearPlaylist() {
         </div>
       </div>
     </Transition>
-  </div>
+    </div>
+  </Transition>
 
   <!-- 点击外部关闭播放列表 -->
   <div 
-    v-if="showPlaylist"
+    v-if="showPlaylist && !isSelectMode && !isModalOpen"
     class="fixed inset-0 z-40"
     @click="showPlaylist = false"
   ></div>
@@ -376,5 +380,16 @@ function clearPlaylist() {
 .cache-dot-leave-to {
   opacity: 0;
   transform: scale(0);
+}
+
+/* 播放条隐藏/显示动画 */
+.player-bar-enter-active,
+.player-bar-leave-active {
+  transition: all 0.3s ease;
+}
+.player-bar-enter-from,
+.player-bar-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
 }
 </style>
