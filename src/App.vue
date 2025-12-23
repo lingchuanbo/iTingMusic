@@ -21,14 +21,27 @@ const store = usePlayerStore()
 const activeView = ref('home')
 const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
+// AI选歌全屏模式
+const aiPickerFullscreen = ref(false)
+
+// 当离开AI选歌页面时重置全屏状态
+watch(activeView, (newView) => {
+  if (newView !== 'aipicker') {
+    aiPickerFullscreen.value = false
+  }
+})
+
 // 搜索弹窗是否打开
 const isSearchOpen = computed(() => searchBarRef.value?.showMobileSearch ?? false)
 
-// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏）
-const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value)
+// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏）
+const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value)
 
-// 是否显示播放栏（搜索弹窗打开时隐藏）
-const showPlayerBar = computed(() => !isSearchOpen.value)
+// 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏）
+const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value)
+
+// 是否显示底部导航（AI全屏时隐藏）
+const showMobileNav = computed(() => !aiPickerFullscreen.value)
 
 // 动态背景
 const bgStyle = computed(() => {
@@ -83,7 +96,7 @@ provide('openGlobalSearch', openGlobalSearch)
       <Sidebar :active-view="activeView" @navigate="handleNavigate" class="hidden md:flex" />
 
       <!-- 主内容区 - 移动端需要为底部导航+播放栏留出空间，顶部需要安全区域间距 -->
-      <main class="flex-1 flex flex-col overflow-hidden mobile-main-content md:pb-14 pt-safe-top md:pt-0">
+      <main :class="['flex-1 flex flex-col overflow-hidden md:pb-14 pt-safe-top md:pt-0', aiPickerFullscreen ? 'pb-0' : 'mobile-main-content']">
         <!-- 首页：推荐内容 -->
         <template v-if="activeView === 'home'">
           <HomeView @navigate="handleNavigate" />
@@ -95,7 +108,7 @@ provide('openGlobalSearch', openGlobalSearch)
         </template>
 
         <!-- AI 选歌 -->
-        <AIPickerView v-else-if="activeView === 'aipicker'" />
+        <AIPickerView v-else-if="activeView === 'aipicker'" @fullscreen="aiPickerFullscreen = $event" />
 
         <!-- 排行榜 -->
         <ToplistView v-else-if="activeView === 'toplist'" />
@@ -117,8 +130,10 @@ provide('openGlobalSearch', openGlobalSearch)
       </main>
     </div>
 
-    <!-- 移动端底部导航 -->
-    <MobileNav :active-view="activeView" @navigate="handleNavigate" class="md:hidden" />
+    <!-- 移动端底部导航 - AI全屏时隐藏 -->
+    <Transition name="nav-slide">
+      <MobileNav v-if="showMobileNav" :active-view="activeView" @navigate="handleNavigate" class="md:hidden" />
+    </Transition>
 
     <!-- 全局搜索浮动按钮（除设置页面外显示） -->
     <Transition name="fab">
@@ -182,6 +197,17 @@ provide('openGlobalSearch', openGlobalSearch)
 }
 .player-bar-enter-from,
 .player-bar-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
+/* 底部导航显示/隐藏动画 */
+.nav-slide-enter-active,
+.nav-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.nav-slide-enter-from,
+.nav-slide-leave-to {
   opacity: 0;
   transform: translateY(100%);
 }
