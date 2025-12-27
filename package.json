@@ -1,6 +1,6 @@
 {
-  "name": "iting-music",
-  "version": "0.1.0",
+  "name": "lingting-music",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

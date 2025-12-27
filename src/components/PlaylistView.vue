@@ -101,12 +101,6 @@ function getPlaylistCovers(playlist: Playlist): string[] {
   return covers
 }
 
-// 获取歌单封面（使用第一首歌的封面，兼容旧逻辑）
-function getPlaylistCover(playlist: Playlist): string | undefined {
-  const covers = getPlaylistCovers(playlist)
-  return covers[0]
-}
-
 // 打开封面选择弹窗
 function openCoverPicker(playlistId: string) {
   coverPickerPlaylistId.value = playlistId

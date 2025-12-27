@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
+import { usePlaylistStore } from '@/store/playlist'
+import { trackStorage } from '@/services/TrackStorage'
 
 // Props
 defineProps<{
@@ -10,16 +12,16 @@ import {
   aggregateSearch,
   searchResultToTrack,
   getLyrics,
-  searchSongs,
-  getEnabledSources,
   type SearchResult,
   type AudioQuality
 } from '@/services/source/OnlineApiSource'
 import { scanLocalFiles } from '@/services/source/LocalSource'
 import { processSearchKeyword, isPinyin } from '@/utils/pinyin'
 import { getAIRecommendations, isAIConfigured, getCurrentRole } from '@/services/ai/AIService'
+import { searchAndMatch } from '@/utils/songMatcher'
 
 const store = usePlayerStore()
+const playlistStore = usePlaylistStore()
 const keyword = ref('')
 
 // 搜索模式: normal 普通搜索, ai AI搜索
@@ -176,6 +178,52 @@ function batchAddToFavorite() {
   exitSelectMode()
 }
 
+// 批量播放选中歌曲
+function batchPlaySelected() {
+  const selected = searchResults.value.filter(r => selectedItems.value.has(getResultKey(r)))
+  if (selected.length === 0) return
+  
+  let firstIdx = -1
+  selected.forEach((result, idx) => {
+    const track = searchResultToTrack(result, quality.value)
+    getLyrics(result.platform, result.id).then(lrc => {
+      const t = store.playlist.find(t => t.id === track.id)
+      if (t) t.lrc = lrc
+    })
+    store.addTrack(track)
+    if (idx === 0) {
+      firstIdx = store.playlist.length - 1
+    }
+  })
+  
+  if (firstIdx >= 0) {
+    store.playTrack(firstIdx)
+  }
+  exitSelectMode()
+}
+
+// 歌单选择弹窗
+const showPlaylistPicker = ref(false)
+
+// 打开歌单选择弹窗
+function openPlaylistPicker() {
+  if (selectedItems.value.size === 0) return
+  showPlaylistPicker.value = true
+}
+
+// 批量添加到指定歌单
+function batchAddToPlaylist2(playlistId: string) {
+  const selected = searchResults.value.filter(r => selectedItems.value.has(getResultKey(r)))
+  selected.forEach(result => {
+    const track = searchResultToTrack(result, quality.value)
+    trackStorage.saveTrack(track)
+    playlistStore.addToPlaylist(playlistId, track.id)
+    store.addTrack(track)
+  })
+  showPlaylistPicker.value = false
+  exitSelectMode()
+}
+
 // 处理点击事件
 function handleResultClick(result: SearchResult) {
   if (isSelectMode.value) {
@@ -251,24 +299,11 @@ async function handleAiSearch(query: string) {
     if (result && result.songs.length > 0) {
       aiResponse.value = result.reason || `为你找到 ${result.songs.length} 首推荐`
 
-      // 搜索 AI 推荐的歌曲
-      const sources = getEnabledSources()
-      for (const song of result.songs.slice(0, 5)) {
-        for (const source of sources) {
-          try {
-            const results = await searchSongs(source, `${song.title} ${song.artist}`, 3)
-            const match = results.find(
-              r =>
-                r.name.toLowerCase().includes(song.title.toLowerCase()) ||
-                song.title.toLowerCase().includes(r.name.toLowerCase())
-            ) || results[0]
-            if (match) {
-              searchResults.value.push(match)
-              break
-            }
-          } catch {
-            continue
-          }
+      // 使用精准匹配搜索 AI 推荐的歌曲（与 AIPickerView 保持一致）
+      for (const song of result.songs.slice(0, 8)) {
+        const match = await searchAndMatch(song.title, song.artist, ['qq', 'netease'])
+        if (match) {
+          searchResults.value.push(match)
         }
       }
 
@@ -380,9 +415,21 @@ function getPlatformIcon(platform: string) {
           @focus="searchResults.length && (showResults = true)"
           type="text"
           :placeholder="searchMode === 'ai' ? '描述你想听的音乐...' : '搜索歌曲、歌手...'"
-          class="w-full h-10 pl-10 pr-4 rounded-xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 transition-colors"
+          class="w-full h-10 pl-10 pr-10 rounded-xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 transition-colors"
         />
         <span class="absolute left-3 top-1/2 -translate-y-1/2 text-white/40">🔍</span>
+        <!-- 清除按钮 -->
+        <Transition name="fade">
+          <button
+            v-if="keyword.length > 0"
+            @click.stop="keyword = ''"
+            class="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-5 h-5 rounded-full bg-white/30 flex items-center justify-center text-white/80 hover:bg-white/40 hover:text-white active:scale-90 transition-all"
+          >
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </Transition>
         <!-- 简拼提示 -->
         <Transition name="hint">
           <div
@@ -601,9 +648,21 @@ function getPlatformIcon(platform: string) {
                   @keyup.enter="handleSearch"
                   type="text"
                   :placeholder="searchMode === 'ai' ? '描述你想听的音乐...' : '搜索歌曲、歌手...'"
-                  class="w-full h-12 pl-4 pr-4 rounded-2xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 focus:ring-2 focus:ring-purple-500/30 text-base transition-all"
+                  class="w-full h-12 pl-4 pr-10 rounded-2xl bg-white/10 text-white placeholder-white/40 outline-none focus:bg-white/15 focus:ring-2 focus:ring-purple-500/30 text-base transition-all"
                   autofocus
                 />
+                <!-- 清除按钮 -->
+                <Transition name="fade">
+                  <button
+                    v-if="keyword.length > 0"
+                    @click.stop="keyword = ''"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full bg-white/30 flex items-center justify-center text-white/80 hover:bg-white/40 hover:text-white active:scale-90 transition-all"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </Transition>
               </div>
               <button
                 @click="handleSearch"
@@ -694,17 +753,6 @@ function getPlatformIcon(platform: string) {
             
             <!-- 搜索结果列表 -->
             <div v-if="searchResults.length > 0" class="px-3 pb-4">
-              <!-- 多选模式提示栏 -->
-              <div v-if="isSelectMode" class="flex items-center justify-between px-3 py-2.5 mb-2 rounded-xl bg-purple-600/10 border border-purple-500/20">
-                <span class="text-white/70 text-sm">已选 <span class="text-purple-400 font-medium">{{ selectedItems.size }}</span> 首</span>
-                <button 
-                  @click="toggleSelectAll"
-                  class="text-purple-400 text-sm font-medium"
-                >
-                  {{ selectedItems.size === searchResults.length ? '取消全选' : '全选' }}
-                </button>
-              </div>
-              
               <!-- 结果数量提示 -->
               <div v-if="!isSelectMode && searchResults.length > 0" class="px-2 py-1.5 mb-2">
                 <span class="text-white/40 text-xs">找到 {{ searchResults.length }} 首歌曲</span>
@@ -782,40 +830,87 @@ function getPlatformIcon(platform: string) {
             </div>
           </div>
           
-          <!-- 批量操作栏（多选模式） -->
-          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-4 pt-3 border-t border-white/5 bg-neutral-900/95">
-            <div class="flex gap-2">
-              <button
-                @click="batchAddToPlaylist"
-                class="flex-1 h-12 rounded-2xl bg-purple-600 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-purple-500/20"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-                </svg>
-                添加到列表
-              </button>
-              <button
-                @click="batchAddToFavorite"
-                class="flex-1 h-12 rounded-2xl bg-gradient-to-r from-pink-600 to-rose-500 text-white font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all shadow-lg shadow-pink-500/20"
-              >
-                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                </svg>
-                收藏
-              </button>
-              <button
-                @click="exitSelectMode"
-                class="w-12 h-12 rounded-2xl bg-white/10 text-white/60 flex items-center justify-center active:scale-95 transition-all"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
+          <!-- 批量操作栏（多选模式）- 与播放列表样式一致 -->
+          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-4 pt-2 border-t border-white/5">
+            <div class="rounded-2xl bg-neutral-800/90 backdrop-blur-xl border border-white/10 overflow-hidden">
+              <!-- 顶部信息栏 -->
+              <div class="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <button @click="exitSelectMode" class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/20 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                  <span class="text-white font-medium">已选 <span class="text-purple-400">{{ selectedItems.size }}</span> 首</span>
+                </div>
+                <button @click="toggleSelectAll" class="text-purple-400 text-sm hover:text-purple-300 transition-colors">
+                  {{ selectedItems.size === searchResults.length ? '取消全选' : '全选' }}
+                </button>
+              </div>
+              <!-- 操作按钮 -->
+              <div class="flex items-center justify-around py-3 px-2">
+                <button @click="batchPlaySelected" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+                  <div class="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center group-hover:bg-purple-500 transition-colors">
+                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  </div>
+                  <span class="text-white/70 text-xs">播放</span>
+                </button>
+                <button @click="batchAddToPlaylist" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+                  <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-purple-600/20 transition-colors">
+                    <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  </div>
+                  <span class="text-white/70 text-xs">列表</span>
+                </button>
+                <button @click="openPlaylistPicker" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+                  <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-blue-600/20 transition-colors">
+                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+                  </div>
+                  <span class="text-white/70 text-xs">歌单</span>
+                </button>
+                <button @click="batchAddToFavorite" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+                  <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-pink-600/20 transition-colors">
+                    <svg class="w-5 h-5 text-pink-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                  </div>
+                  <span class="text-white/70 text-xs">喜欢</span>
+                </button>
+              </div>
             </div>
           </div>
           
+          <!-- 歌单选择弹窗 -->
+          <Transition name="fade">
+            <div v-if="showPlaylistPicker" class="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center" @click.self="showPlaylistPicker = false">
+              <div class="w-full max-h-[60vh] bg-neutral-900 rounded-t-2xl overflow-hidden">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+                  <span class="text-white font-medium">添加到歌单</span>
+                  <button @click="showPlaylistPicker = false" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                </div>
+                <div class="overflow-y-auto max-h-[50vh] p-2">
+                  <div v-if="playlistStore.playlists.length === 0" class="text-center py-8 text-white/40">
+                    <p>还没有歌单</p>
+                    <p class="text-sm mt-1">去歌单页面创建一个吧</p>
+                  </div>
+                  <button
+                    v-for="playlist in playlistStore.playlists"
+                    :key="playlist.id"
+                    @click="batchAddToPlaylist2(playlist.id)"
+                    class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/10 transition-colors"
+                  >
+                    <div class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
+                      <svg class="w-5 h-5 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+                    </div>
+                    <div class="flex-1 text-left">
+                      <p class="text-white text-sm">{{ playlist.name }}</p>
+                      <p class="text-white/40 text-xs">{{ playlist.trackIds.length }} 首歌曲</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </Transition>
+          
           <!-- 底部操作栏（非多选模式） -->
-          <div v-else class="px-4 pb-5 pt-2 border-t border-white/5">
+          <div v-if="!isSelectMode || selectedItems.size === 0" class="px-4 pb-5 pt-2 border-t border-white/5">
             <div class="flex gap-2">
               <!-- 换一批按钮 -->
               <button

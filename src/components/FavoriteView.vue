@@ -184,14 +184,6 @@ function createAndAddToPlaylist() {
 
 const selectedCount = computed(() => selectedIds.value.size)
 
-function toggleFavorite(id: string) {
-  const idx = favorites.value.findIndex(t => t.id === id)
-  if (idx >= 0) {
-    favorites.value.splice(idx, 1)
-    saveFavoritesData()
-  }
-}
-
 function playSong(track: Track) {
   let idx = store.playlist.findIndex(t => t.id === track.id)
   if (idx < 0) {
