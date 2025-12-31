@@ -1,6 +1,7 @@
 import { Howl } from 'howler'
 import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
+import { useOfflineStore } from '@/store/offline'
 import { audioCache } from '@/services/cache/AudioCache'
 import { backgroundMode } from '@/services/player/BackgroundMode'
 import { getActualMusicUrl, type MusicSource } from '@/services/source/OnlineApiSource'
@@ -119,6 +120,7 @@ class AudioPlayer {
   async play(url: string, track?: Track) {
     this.destroy()
     const store = usePlayerStore()
+    const offlineStore = useOfflineStore()
 
     let playUrl = url
     const onlineTrack = track as OnlineTrack
@@ -133,6 +135,11 @@ class AudioPlayer {
           store.setCached(true)
           store.setBuffered(100)
           console.log('使用缓存播放:', track.title)
+        } else if (offlineStore.isOfflineMode) {
+          // 离线模式下，没有缓存则跳过
+          console.log('离线模式：歌曲未缓存，跳过', track.title)
+          this.handlePlayError(store)
+          return
         } else if (onlineTrack._platform && onlineTrack._songId) {
           store.setCached(false)
           store.setBuffered(0)

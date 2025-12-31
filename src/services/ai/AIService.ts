@@ -1,35 +1,55 @@
 // AI 服务配置
 export interface AIConfig {
-  provider: 'openai' | 'deepseek' | 'custom'
+  provider: 'builtin' | 'custom'
+  builtinId?: string // 内置AI的ID
   apiKey: string
   baseUrl: string
   model: string
+  authType?: 'bearer' | 'api-key' // 认证方式，默认 bearer
 }
+
+// 内置AI配置定义
+export interface BuiltinAI {
+  id: string
+  name: string
+  apiKey: string
+  baseUrl: string
+  model: string
+  authType?: 'bearer' | 'api-key' // 认证方式，默认 bearer
+}
+
+// 内置AI列表
+export const BUILTIN_AI_LIST: BuiltinAI[] = [
+  {
+    id: 'longcat',
+    name: 'longcat',
+    apiKey: 'ak_1bx0ge7Cp8Zg7NU3WN5TT2OF8F782',
+    baseUrl: 'https://api.longcat.chat/openai/v1',
+    model: 'LongCat-Flash-Chat',
+    authType: 'bearer'
+  },
+  {
+    id: 'xiaomimimo',
+    name: 'xiaomimimo',
+    apiKey: 'sk-cjt6u6uv879262yojuxmrxeq7o4kii0dqn6duo8r5etvhvmi',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    model: 'mimo-v2-flash',
+    authType: 'bearer' // xiaomimimo 支持标准 OpenAI 格式
+  }
+]
 
 const STORAGE_KEY = 'zen_ai_config'
 
-// 默认配置
-const defaultConfigs: Record<string, Partial<AIConfig>> = {
-  openai: {
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-3.5-turbo'
-  },
-  deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat'
-  },
-  custom: {
-    baseUrl: '',
-    model: ''
-  }
-}
+// 默认配置（使用第一个内置AI）
+const DEFAULT_BUILTIN_AI = BUILTIN_AI_LIST[0]
 
 // 内置默认 AI 配置
 const BUILTIN_AI_CONFIG: AIConfig = {
-  provider: 'custom',
-  apiKey: 'ak_1bx0ge7Cp8Zg7NU3WN5TT2OF8F782',
-  baseUrl: 'https://api.longcat.chat/openai/v1',
-  model: 'LongCat-Flash-Chat'
+  provider: 'builtin',
+  builtinId: DEFAULT_BUILTIN_AI.id,
+  apiKey: DEFAULT_BUILTIN_AI.apiKey,
+  baseUrl: DEFAULT_BUILTIN_AI.baseUrl,
+  model: DEFAULT_BUILTIN_AI.model
 }
 
 // 加载配置
@@ -37,7 +57,12 @@ export function loadAIConfig(): AIConfig {
   try {
     const data = localStorage.getItem(STORAGE_KEY)
     if (data) {
-      return JSON.parse(data)
+      const config = JSON.parse(data)
+      // 兼容旧版配置格式
+      if (config.provider === 'openai' || config.provider === 'deepseek') {
+        config.provider = 'custom'
+      }
+      return config
     }
   } catch {}
   // 返回内置默认配置
@@ -55,9 +80,27 @@ export function resetToBuiltinConfig() {
   return { ...BUILTIN_AI_CONFIG }
 }
 
-// 获取默认配置
-export function getDefaultConfig(provider: string) {
-  return defaultConfigs[provider] || defaultConfigs.custom
+// 根据内置AI ID获取配置
+export function getBuiltinAIConfig(builtinId: string): BuiltinAI | undefined {
+  return BUILTIN_AI_LIST.find(ai => ai.id === builtinId)
+}
+
+// 切换到内置AI
+export function switchToBuiltinAI(builtinId: string): AIConfig {
+  const builtinAI = getBuiltinAIConfig(builtinId)
+  if (!builtinAI) {
+    return { ...BUILTIN_AI_CONFIG }
+  }
+  const config: AIConfig = {
+    provider: 'builtin',
+    builtinId: builtinAI.id,
+    apiKey: builtinAI.apiKey,
+    baseUrl: builtinAI.baseUrl,
+    model: builtinAI.model,
+    authType: builtinAI.authType || 'bearer'
+  }
+  saveAIConfig(config)
+  return config
 }
 
 // AI 角色定义
@@ -527,11 +570,17 @@ export async function getAIRecommendations(
       generateSystemPrompt(currentRole) +
       `\n\n[内部指令-请勿在回复中提及] 随机种子: ${randomSeed}，请基于此生成独特且新颖的推荐，不要重复之前可能推荐过的歌曲。`
 
+    // 根据 authType 设置认证头
+    const authHeaders: Record<string, string> =
+      config.authType === 'api-key'
+        ? { 'api-key': config.apiKey }
+        : { Authorization: `Bearer ${config.apiKey}` }
+
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey}`
+        ...authHeaders
       },
       body: JSON.stringify({
         model: config.model,
@@ -759,16 +808,22 @@ export async function getAIRecommendationsSync(
 } | null> {
   const config = loadAIConfig()
   const currentRole = role || getCurrentRole()
-  
+
   if (!config.apiKey) {
     throw new Error('请先在设置中配置 AI API Key')
   }
+
+  // 根据 authType 设置认证头
+  const authHeaders: Record<string, string> =
+    config.authType === 'api-key'
+      ? { 'api-key': config.apiKey }
+      : { Authorization: `Bearer ${config.apiKey}` }
 
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`
+      ...authHeaders
     },
     body: JSON.stringify({
       model: config.model,
@@ -787,7 +842,7 @@ export async function getAIRecommendationsSync(
 
   const data = await response.json()
   const content = data.choices?.[0]?.message?.content
-  
+
   let jsonStr = content
   const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
   if (jsonMatch) jsonStr = jsonMatch[1]

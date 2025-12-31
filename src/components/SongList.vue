@@ -5,6 +5,7 @@ import { usePlaylistStore } from '@/store/playlist'
 import { setSelectMode } from '@/store/ui'
 import { formatTime } from '@/utils/formatTime'
 import { trackStorage } from '@/services/TrackStorage'
+import DownloadButton from '@/components/DownloadButton.vue'
 
 type ViewMode = 'list' | 'grid' | 'compact'
 
@@ -192,12 +193,7 @@ function toggleFavorite(id: string) {
 }
 
 function removeTrack(index: number) {
-  store.playlist.splice(index, 1)
-  if (store.currentIndex === index) {
-    store.currentIndex = -1
-  } else if (store.currentIndex > index) {
-    store.currentIndex--
-  }
+  store.removeTrack(index)
 }
 
 // 添加到歌单
@@ -233,6 +229,14 @@ function createAndAdd() {
   showAddToPlaylist.value = false
   addingTrackId.value = null
 }
+
+// 清空播放列表
+const showClearConfirm = ref(false)
+
+function clearPlaylist() {
+  store.clearPlaylist()
+  showClearConfirm.value = false
+}
 </script>
 
 <template>
@@ -245,6 +249,17 @@ function createAndAdd() {
       </h2>
 
       <div class="flex items-center gap-2">
+        <!-- 清空按钮 -->
+        <button
+          v-if="!isSelectMode && store.playlist.length > 0"
+          @click="showClearConfirm = true"
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+          <span class="hidden sm:inline">清空</span>
+        </button>
         <span v-if="!isSelectMode && store.playlist.length > 0" class="text-white/40 text-sm hidden md:block">长按多选</span>
         <!-- 视图切换按钮 -->
         <div class="flex gap-1 bg-white/5 rounded-lg p-1">
@@ -365,7 +380,9 @@ function createAndAdd() {
           <p class="text-white font-medium truncate">{{ track.title }}</p>
           <p class="text-white/50 text-sm truncate">{{ track.artist }}</p>
         </div>
-        <span class="text-white/40 text-sm">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+        <span class="text-white/40 text-sm hidden sm:inline">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+        <!-- 下载按钮 -->
+        <DownloadButton v-if="!isSelectMode && track.source === 'online'" :track="track" size="sm" />
         <!-- 更多操作按钮（长按进入多选） -->
         <button
           v-if="!isSelectMode"
@@ -596,6 +613,48 @@ function createAndAdd() {
               class="w-full h-10 rounded-lg bg-white/10 text-white/60 hover:bg-white/20"
             >
               取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 清空确认弹窗 -->
+    <Transition name="fade">
+      <div 
+        v-if="showClearConfirm"
+        class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+        @click.self="showClearConfirm = false"
+      >
+        <div class="w-full max-w-xs bg-neutral-900 rounded-2xl overflow-hidden border border-white/10 shadow-2xl">
+          <!-- 图标 -->
+          <div class="pt-6 pb-4 flex justify-center">
+            <div class="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
+              <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+              </svg>
+            </div>
+          </div>
+          
+          <!-- 文字 -->
+          <div class="px-6 pb-4 text-center">
+            <h3 class="text-white font-bold text-lg mb-2">清空播放列表？</h3>
+            <p class="text-white/50 text-sm">将移除全部 {{ store.playlist.length }} 首歌曲，此操作无法撤销</p>
+          </div>
+          
+          <!-- 按钮 -->
+          <div class="p-4 flex gap-3 border-t border-white/5">
+            <button
+              @click="showClearConfirm = false"
+              class="flex-1 h-11 rounded-xl bg-white/10 text-white font-medium hover:bg-white/15 transition-colors"
+            >
+              取消
+            </button>
+            <button
+              @click="clearPlaylist"
+              class="flex-1 h-11 rounded-xl bg-red-500 text-white font-medium hover:bg-red-400 transition-colors"
+            >
+              清空
             </button>
           </div>
         </div>

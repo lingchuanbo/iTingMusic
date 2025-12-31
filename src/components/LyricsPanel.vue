@@ -7,6 +7,7 @@ import { getLyrics, type MusicSource } from '@/services/source/OnlineApiSource'
 import { formatTime } from '@/utils/formatTime'
 import { audioCache } from '@/services/cache/AudioCache'
 import { trackStorage } from '@/services/TrackStorage'
+import { downloadService } from '@/services/DownloadService'
 
 const store = usePlayerStore()
 
@@ -40,6 +41,75 @@ const loadingLyrics = ref(false)
 const showLyrics = ref(false) // 是否显示歌词（点击切换）
 const displayMode = ref<'card' | 'vinyl'>('card') // 展示模式：卡片 / 黑胶唱片
 const showPlaylistDrawer = ref(false) // 播放列表抽屉
+const showLyricsSettings = ref(false) // 歌词设置面板
+
+// 歌词设置（从 localStorage 读取）
+interface LyricsSettings {
+  blur: boolean // 是否启用模糊效果
+  align: 'center' | 'left' // 对齐方式
+  currentColor: string // 当前歌词颜色
+}
+
+const defaultLyricsSettings: LyricsSettings = {
+  blur: true,
+  align: 'center',
+  currentColor: '#ffffff'
+}
+
+const lyricsSettings = ref<LyricsSettings>({ ...defaultLyricsSettings })
+
+// 预设颜色
+const presetColors = [
+  '#ffffff', // 白色
+  '#a855f7', // 紫色
+  '#ec4899', // 粉色
+  '#3b82f6', // 蓝色
+  '#22c55e', // 绿色
+  '#eab308', // 黄色
+  '#f97316', // 橙色
+  '#ef4444', // 红色
+]
+
+// 加载歌词设置
+function loadLyricsSettings() {
+  try {
+    const saved = localStorage.getItem('lyrics_settings')
+    if (saved) {
+      lyricsSettings.value = { ...defaultLyricsSettings, ...JSON.parse(saved) }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+// 保存歌词设置
+function saveLyricsSettings() {
+  localStorage.setItem('lyrics_settings', JSON.stringify(lyricsSettings.value))
+}
+
+// 切换模糊效果
+function toggleBlur() {
+  lyricsSettings.value.blur = !lyricsSettings.value.blur
+  saveLyricsSettings()
+}
+
+// 切换对齐方式（保留以备将来使用）
+function _toggleAlign() {
+  lyricsSettings.value.align = lyricsSettings.value.align === 'center' ? 'left' : 'center'
+  saveLyricsSettings()
+}
+void _toggleAlign
+
+// 设置当前歌词颜色
+function setCurrentColor(color: string) {
+  lyricsSettings.value.currentColor = color
+  saveLyricsSettings()
+}
+
+// 初始化加载设置
+onMounted(() => {
+  loadLyricsSettings()
+})
 
 // 播放模式文本
 const playModeText = computed(() => {
@@ -122,6 +192,9 @@ function toggleFavorite() {
 }
 
 // 下载相关
+const isDownloading = ref(false)
+const downloadProgress = ref(0)
+
 const isDownloaded = computed(() => {
   // 简单判断：本地文件或已缓存
   if (!store.currentTrack) return false
@@ -129,9 +202,23 @@ const isDownloaded = computed(() => {
 })
 
 async function handleDownload() {
-  if (!store.currentTrack || isDownloaded.value) return
-  // 这里可以实现下载逻辑，暂时只是提示
-  alert('下载功能开发中')
+  if (!store.currentTrack || isDownloaded.value || isDownloading.value) return
+  
+  isDownloading.value = true
+  downloadProgress.value = 0
+  
+  // 监听下载进度
+  const unsubscribe = downloadService.addListener((task) => {
+    if (task.id === store.currentTrack?.id) {
+      downloadProgress.value = task.progress
+      if (task.status === 'completed' || task.status === 'failed') {
+        isDownloading.value = false
+        unsubscribe()
+      }
+    }
+  })
+  
+  await downloadService.download(store.currentTrack)
 }
 
 // 添加到歌单
@@ -418,30 +505,81 @@ function updateSeekingLyric() {
   seekingLyricIndex.value = closestIndex
 }
 
+// 根据歌词距离当前行的远近计算样式（透明度和模糊）
+function getLyricStyle(index: number) {
+  // 用户滚动时不应用距离效果
+  if (isUserScrolling.value) {
+    return {}
+  }
 
+  const distance = Math.abs(index - currentLyricIndex.value)
 
-// 当打开歌词面板时，如果没有歌词则尝试加载
-watch(() => store.showLyrics, async (show) => {
+  // 当前行
+  if (distance === 0) {
+    return {
+      opacity: 1,
+      filter: 'blur(0px)',
+      fontSize: '1.25rem',
+      color: lyricsSettings.value.currentColor
+    }
+  }
+
+  // 根据距离计算透明度和模糊度
+  const opacity = Math.max(0.15, 1 - distance * 0.15)
+  const blur =
+    lyricsSettings.value.blur && distance > 2
+      ? Math.min((distance - 2) * 0.5, 2)
+      : 0
+  const fontSize = distance <= 1 ? '1rem' : '0.95rem'
+
+  return {
+    opacity,
+    filter: `blur(${blur}px)`,
+    fontSize
+  }
+}
+
+// 加载歌词的函数（可复用）
+async function loadLyricsForTrack(forceRefresh = false) {
   const track = store.currentTrack
-  if (show && track && !track.lrc && track._platform && track._songId) {
-    loadingLyrics.value = true
-    try {
-      // 先尝试从缓存获取歌词
+  if (!track || (!track._platform && !track._songId)) return
+  
+  // 如果不是强制刷新且已有歌词，则跳过
+  if (!forceRefresh && track.lrc) return
+  
+  loadingLyrics.value = true
+  try {
+    // 强制刷新时跳过缓存
+    if (!forceRefresh) {
       const cachedLrc = await audioCache.getLyrics(track.id)
       if (cachedLrc) {
         track.lrc = cachedLrc
-      } else {
-        // 从网络获取并缓存
-        const lrc = await getLyrics(track._platform as MusicSource, track._songId)
-        if (lrc) {
-          track.lrc = lrc
-          // 缓存歌词
-          audioCache.cacheLyrics(track.id, lrc)
-        }
+        return
       }
-    } finally {
-      loadingLyrics.value = false
     }
+    
+    // 从网络获取并缓存
+    if (track._platform && track._songId) {
+      const lrc = await getLyrics(track._platform as MusicSource, track._songId)
+      if (lrc) {
+        track.lrc = lrc
+        audioCache.cacheLyrics(track.id, lrc)
+      }
+    }
+  } finally {
+    loadingLyrics.value = false
+  }
+}
+
+// 刷新歌词
+async function refreshLyrics() {
+  await loadLyricsForTrack(true)
+}
+
+// 当打开歌词面板时，如果没有歌词则尝试加载
+watch(() => store.showLyrics, async (show) => {
+  if (show && store.currentTrack && !store.currentTrack.lrc) {
+    await loadLyricsForTrack()
   }
   // 重置为唱片视图
   if (show) showLyrics.value = false
@@ -576,6 +714,17 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             <rect x="6" y="8" width="6" height="6" rx="1" stroke-width="1"/>
           </svg>
         </button>
+        <!-- 歌词设置 -->
+        <button 
+          @click.stop="showLyricsSettings = true"
+          class="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors"
+          title="歌词设置"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+        </button>
       </div>
 
       <!-- 主内容区 -->
@@ -655,10 +804,18 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
                       </button>
-                      <button @click.stop="handleDownload" :class="isDownloaded ? 'text-green-400' : 'text-white/60 hover:text-white'" class="transition-colors">
+                      <button @click.stop="handleDownload" :disabled="isDownloading" :class="isDownloaded ? 'text-green-400' : isDownloading ? 'text-purple-400' : 'text-white/60 hover:text-white'" class="transition-colors relative">
                         <svg v-if="isDownloaded" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
+                        <template v-else-if="isDownloading">
+                          <svg class="w-6 h-6 -rotate-90" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-20"/>
+                            <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                              :stroke-dasharray="62.83" :stroke-dashoffset="62.83 * (1 - downloadProgress / 100)"/>
+                          </svg>
+                          <span class="absolute inset-0 flex items-center justify-center text-[8px] font-bold">{{ downloadProgress }}</span>
+                        </template>
                         <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                         </svg>
@@ -691,54 +848,108 @@ function updateProgress(e: TouchEvent | MouseEvent) {
 
           <!-- 黑胶唱片视图 -->
           <div v-else-if="!showLyrics && displayMode === 'vinyl'" key="vinyl" class="w-full h-full relative overflow-hidden flex flex-col items-center justify-center">
-            <!-- 唱针 -->
-            <div class="absolute top-8 md:top-12 right-1/2 translate-x-[120px] md:translate-x-[160px] z-20">
-              <svg 
-                :class="['w-20 h-28 md:w-24 md:h-32 transition-transform duration-500 origin-top', store.isPlaying ? 'rotate-[18deg]' : 'rotate-[-15deg]']"
-                viewBox="0 0 60 90"
-              >
-                <defs>
-                  <linearGradient id="needleBase" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#888"/>
-                    <stop offset="100%" style="stop-color:#444"/>
-                  </linearGradient>
-                  <linearGradient id="needleArm" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#aaa"/>
-                    <stop offset="100%" style="stop-color:#666"/>
-                  </linearGradient>
-                </defs>
-                <circle cx="12" cy="12" r="10" fill="url(#needleBase)"/>
-                <circle cx="12" cy="12" r="6" fill="#555"/>
-                <path d="M12 18 Q 20 40, 35 70" stroke="url(#needleArm)" stroke-width="4" fill="none" stroke-linecap="round"/>
-                <ellipse cx="37" cy="75" rx="5" ry="8" fill="#888"/>
-                <ellipse cx="37" cy="82" rx="2" ry="3" fill="#666"/>
-              </svg>
-            </div>
-
-            <!-- 黑胶唱片 -->
+            <!-- 黑胶唱片 + 唱针容器 -->
             <div class="relative mt-6">
+              <!-- 唱针 - 定位在唱片右上角 -->
+              <div class="absolute -top-14 -right-6 md:-top-16 md:-right-4 z-20 drop-shadow-lg">
+                <svg 
+                  :class="[
+                    'w-24 h-32 md:w-28 md:h-36 origin-[20%_15%]',
+                    store.isPlaying ? 'needle-playing' : 'needle-idle'
+                  ]"
+                  viewBox="0 0 60 90"
+                >
+                  <defs>
+                    <!-- 底座渐变 - 金属质感 -->
+                    <radialGradient id="needleBaseGrad" cx="30%" cy="30%">
+                      <stop offset="0%" style="stop-color:#c0c0c0"/>
+                      <stop offset="50%" style="stop-color:#808080"/>
+                      <stop offset="100%" style="stop-color:#404040"/>
+                    </radialGradient>
+                    <!-- 唱臂渐变 - 拉丝金属 -->
+                    <linearGradient id="needleArmGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" style="stop-color:#d0d0d0"/>
+                      <stop offset="30%" style="stop-color:#a0a0a0"/>
+                      <stop offset="70%" style="stop-color:#909090"/>
+                      <stop offset="100%" style="stop-color:#707070"/>
+                    </linearGradient>
+                    <!-- 唱头渐变 -->
+                    <linearGradient id="needleHeadGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" style="stop-color:#a0a0a0"/>
+                      <stop offset="100%" style="stop-color:#505050"/>
+                    </linearGradient>
+                    <!-- 阴影滤镜 -->
+                    <filter id="needleShadow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feDropShadow dx="2" dy="3" stdDeviation="2" flood-opacity="0.4"/>
+                    </filter>
+                  </defs>
+                  <!-- 底座阴影 -->
+                  <circle cx="13" cy="14" r="10" fill="rgba(0,0,0,0.3)"/>
+                  <!-- 底座外圈 -->
+                  <circle cx="12" cy="12" r="10" fill="url(#needleBaseGrad)"/>
+                  <!-- 底座内圈 -->
+                  <circle cx="12" cy="12" r="7" fill="#505050"/>
+                  <!-- 底座高光 -->
+                  <circle cx="10" cy="10" r="3" fill="rgba(255,255,255,0.2)"/>
+                  <!-- 底座中心螺丝 -->
+                  <circle cx="12" cy="12" r="3" fill="#303030"/>
+                  <circle cx="11" cy="11" r="1" fill="rgba(255,255,255,0.15)"/>
+                  <!-- 唱臂阴影 -->
+                  <path d="M13 19 Q 23 46, 39 73" stroke="rgba(0,0,0,0.3)" stroke-width="5" fill="none" stroke-linecap="round"/>
+                  <!-- 唱臂主体 -->
+                  <path d="M12 18 Q 22 45, 38 72" stroke="url(#needleArmGrad)" stroke-width="4" fill="none" stroke-linecap="round" filter="url(#needleShadow)"/>
+                  <!-- 唱臂高光线 -->
+                  <path d="M12 17 Q 21 43, 36 69" stroke="rgba(255,255,255,0.15)" stroke-width="1" fill="none" stroke-linecap="round"/>
+                  <!-- 唱头外壳 -->
+                  <ellipse cx="40" cy="76" rx="5" ry="7" fill="url(#needleHeadGrad)"/>
+                  <!-- 唱头高光 -->
+                  <ellipse cx="38" cy="74" rx="2" ry="3" fill="rgba(255,255,255,0.1)"/>
+                  <!-- 唱针 -->
+                  <ellipse cx="40" cy="82" rx="1" ry="2.5" fill="#303030"/>
+                  <ellipse cx="40" cy="84" rx="0.5" ry="1" fill="#c0c0c0"/>
+                </svg>
+              </div>
+
+              <!-- 黑胶唱片 -->
               <div 
-                :class="['w-64 h-64 md:w-72 md:h-72 rounded-full shadow-2xl vinyl-disc', store.isPlaying ? 'animate-spin-vinyl' : '']"
-                :style="{ animationPlayState: store.isPlaying ? 'running' : 'paused' }"
+                :class="['w-64 h-64 md:w-72 md:h-72 rounded-full relative vinyl-record', store.isPlaying ? 'animate-spin-slow' : '']"
               >
-                <!-- 唱片外圈 -->
-                <div class="w-full h-full rounded-full bg-gradient-to-br from-zinc-900 via-zinc-800 to-black p-1 relative">
-                  <!-- 光泽效果 -->
-                  <div class="absolute inset-0 rounded-full bg-gradient-to-tr from-transparent via-white/5 to-transparent"></div>
-                  <!-- 唱片纹路 -->
-                  <div class="absolute inset-[6%] rounded-full border border-zinc-600/30"></div>
-                  <div class="absolute inset-[10%] rounded-full border border-zinc-600/20"></div>
-                  <div class="absolute inset-[14%] rounded-full border border-zinc-600/30"></div>
-                  <div class="absolute inset-[18%] rounded-full border border-zinc-600/20"></div>
-                  <div class="absolute inset-[22%] rounded-full border border-zinc-600/30"></div>
-                  <!-- 封面区域 -->
-                  <div class="absolute inset-[26%] rounded-full overflow-hidden border-4 border-zinc-700/50 shadow-inner">
-                    <img v-if="store.currentTrack?.cover" :src="store.currentTrack.cover" class="w-full h-full object-cover" draggable="false"/>
-                    <div v-else class="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-purple-600/50 to-pink-600/50">🎵</div>
-                  </div>
-                  <!-- 中心轴 -->
-                  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 rounded-full bg-zinc-400 shadow-inner z-10"></div>
+                <!-- 底部外发光 -->
+                <div 
+                  :class="['absolute -inset-4 rounded-full pointer-events-none transition-opacity duration-500', store.isPlaying ? 'opacity-100' : 'opacity-40']"
+                  style="background: radial-gradient(ellipse 80% 50% at 50% 100%, rgba(168, 85, 247, 0.4) 0%, rgba(139, 92, 246, 0.2) 30%, transparent 70%); filter: blur(20px);"
+                ></div>
+                <!-- 外圈玻璃效果 -->
+                <div class="absolute -inset-2 rounded-full" style="background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0.08) 100%); box-shadow: inset 0 1px 1px rgba(255,255,255,0.2), inset 0 -1px 1px rgba(0,0,0,0.1), 0 0 20px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);"></div>
+                <!-- 唱片主体 - 多层渐变 -->
+                <div class="absolute inset-0 rounded-full bg-gradient-to-br from-zinc-800 via-black to-zinc-900"></div>
+                <!-- 唱片边缘高光 -->
+                <div class="absolute inset-0 rounded-full" style="background: conic-gradient(from 0deg, transparent 0%, rgba(255,255,255,0.08) 10%, transparent 20%, rgba(255,255,255,0.05) 30%, transparent 40%, rgba(255,255,255,0.08) 50%, transparent 60%, rgba(255,255,255,0.05) 70%, transparent 80%, rgba(255,255,255,0.08) 90%, transparent 100%);"></div>
+                <!-- 唱片纹路 - 更细腻 -->
+                <div class="absolute inset-[2%] rounded-full border border-zinc-700/50"></div>
+                <div class="absolute inset-[4%] rounded-full border border-zinc-600/30"></div>
+                <div class="absolute inset-[6%] rounded-full border border-zinc-700/40"></div>
+                <div class="absolute inset-[8%] rounded-full border border-zinc-600/25"></div>
+                <div class="absolute inset-[10%] rounded-full border border-zinc-700/35"></div>
+                <div class="absolute inset-[12%] rounded-full border border-zinc-600/30"></div>
+                <div class="absolute inset-[14%] rounded-full border border-zinc-700/40"></div>
+                <div class="absolute inset-[16%] rounded-full border border-zinc-600/25"></div>
+                <div class="absolute inset-[18%] rounded-full border border-zinc-700/35"></div>
+                <div class="absolute inset-[20%] rounded-full border border-zinc-600/30"></div>
+                <div class="absolute inset-[22%] rounded-full border border-zinc-700/40"></div>
+                <!-- 封面区域 -->
+                <div class="absolute inset-[26%] rounded-full overflow-hidden shadow-inner" style="box-shadow: inset 0 2px 8px rgba(0,0,0,0.5), 0 0 0 3px #404040, 0 0 0 5px #303030;">
+                  <img v-if="store.currentTrack?.cover" :src="store.currentTrack.cover" class="w-full h-full object-cover" draggable="false"/>
+                  <div v-else class="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-purple-600/50 to-pink-600/50">🎵</div>
                 </div>
+                <!-- 中心轴 - 金属质感 -->
+                <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 rounded-full" style="background: radial-gradient(circle at 30% 30%, #e0e0e0, #808080 50%, #404040); box-shadow: inset 0 1px 2px rgba(255,255,255,0.3), 0 1px 3px rgba(0,0,0,0.5);"></div>
+                <!-- 中心轴孔 -->
+                <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-zinc-900"></div>
+                <!-- 顶部光泽 -->
+                <div class="absolute inset-0 rounded-full pointer-events-none" style="background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 40%, transparent 60%, rgba(0,0,0,0.1) 100%);"></div>
+                <!-- 边缘阴影 -->
+                <div class="absolute inset-0 rounded-full pointer-events-none" style="box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 8px 32px rgba(0,0,0,0.4);"></div>
               </div>
             </div>
 
@@ -764,10 +975,18 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
                 </button>
-                <button @click.stop="handleDownload" :class="isDownloaded ? 'text-green-400' : 'text-white/60 hover:text-white'" class="transition-colors">
+                <button @click.stop="handleDownload" :disabled="isDownloading" :class="isDownloaded ? 'text-green-400' : isDownloading ? 'text-purple-400' : 'text-white/60 hover:text-white'" class="transition-colors relative">
                   <svg v-if="isDownloaded" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
+                  <template v-else-if="isDownloading">
+                    <svg class="w-6 h-6 -rotate-90" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-20"/>
+                      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                        :stroke-dasharray="62.83" :stroke-dashoffset="62.83 * (1 - downloadProgress / 100)"/>
+                    </svg>
+                    <span class="absolute inset-0 flex items-center justify-center text-[8px] font-bold">{{ downloadProgress }}</span>
+                  </template>
                   <svg v-else class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
@@ -804,9 +1023,12 @@ function updateProgress(e: TouchEvent | MouseEvent) {
             </div>
 
             <!-- 歌词滚动区域 -->
-            <div 
+            <div
               ref="lyricsScrollArea"
-              class="flex-1 w-full overflow-y-auto text-center px-6 md:px-12 lyrics-scroll relative"
+              :class="[
+                'flex-1 w-full overflow-y-auto px-6 md:px-12 lyrics-scroll relative',
+                lyricsSettings.align === 'center' ? 'text-center' : 'text-left'
+              ]"
               @scroll="handleLyricsScroll"
               @touchstart="handleLyricsTouchStart"
               @touchend="handleLyricsTouchEnd"
@@ -819,6 +1041,16 @@ function updateProgress(e: TouchEvent | MouseEvent) {
               <div v-else-if="lyrics.length === 0" class="flex flex-col items-center justify-center h-full text-white/30">
                 <p class="text-4xl mb-3">🎵</p>
                 <p>暂无歌词</p>
+                <button 
+                  v-if="store.currentTrack?._platform && store.currentTrack?._songId"
+                  @click.stop="refreshLyrics"
+                  class="mt-4 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/60 hover:text-white text-sm flex items-center gap-2 transition-colors"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                  </svg>
+                  重新加载
+                </button>
               </div>
               <div v-else ref="lyricsContainer" class="py-[40vh]">
                 <p
@@ -827,11 +1059,12 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                   :class="[
                     'transition-all duration-300 leading-relaxed py-3',
                     currentLyricIndex === index 
-                      ? 'text-white text-lg md:text-xl font-medium scale-105' 
+                      ? 'text-white text-xl md:text-2xl font-bold' 
                       : isUserScrolling && seekingLyricIndex === index
                         ? 'text-purple-400 text-lg font-medium'
-                        : 'text-white/40 text-base'
+                        : 'text-white/60'
                   ]"
+                  :style="getLyricStyle(index)"
                 >
                   {{ line.text || '♪' }}
                 </p>
@@ -1133,6 +1366,101 @@ function updateProgress(e: TouchEvent | MouseEvent) {
       </div>
     </div>
   </Transition>
+
+  <!-- 歌词设置面板 -->
+  <Transition name="slide-up">
+    <div 
+      v-if="showLyricsSettings" 
+      class="fixed inset-0 z-[60] bg-black/60 flex items-end justify-center"
+      @click="showLyricsSettings = false"
+    >
+      <div 
+        class="w-full max-w-md bg-zinc-900 rounded-t-2xl p-4 pb-8"
+        @click.stop
+      >
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-white font-medium">歌词设置</h3>
+          <button @click="showLyricsSettings = false" class="text-white/50 hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        
+        <!-- 模糊效果 -->
+        <div class="flex items-center justify-between py-3 border-b border-white/10">
+          <div>
+            <p class="text-white text-sm">歌词模糊</p>
+            <p class="text-white/40 text-xs">远离当前行的歌词逐渐模糊</p>
+          </div>
+          <button 
+            @click="toggleBlur"
+            :class="[
+              'w-12 h-7 rounded-full transition-colors relative',
+              lyricsSettings.blur ? 'bg-purple-500' : 'bg-white/20'
+            ]"
+          >
+            <span 
+              :class="[
+                'absolute top-1 w-5 h-5 bg-white rounded-full transition-transform',
+                lyricsSettings.blur ? 'left-6' : 'left-1'
+              ]"
+            ></span>
+          </button>
+        </div>
+        
+        <!-- 对齐方式 -->
+        <div class="flex items-center justify-between py-3 border-b border-white/10">
+          <div>
+            <p class="text-white text-sm">对齐方式</p>
+            <p class="text-white/40 text-xs">歌词文字的对齐方式</p>
+          </div>
+          <div class="flex gap-2">
+            <button 
+              @click="lyricsSettings.align = 'center'; saveLyricsSettings()"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                lyricsSettings.align === 'center' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+              ]"
+            >
+              居中
+            </button>
+            <button 
+              @click="lyricsSettings.align = 'left'; saveLyricsSettings()"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                lyricsSettings.align === 'left' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+              ]"
+            >
+              左对齐
+            </button>
+          </div>
+        </div>
+        
+        <!-- 当前歌词颜色 -->
+        <div class="py-3">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <p class="text-white text-sm">当前歌词颜色</p>
+              <p class="text-white/40 text-xs">正在播放的歌词高亮颜色</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <button
+              v-for="color in presetColors"
+              :key="color"
+              @click="setCurrentColor(color)"
+              :class="[
+                'w-8 h-8 rounded-full transition-transform hover:scale-110',
+                lyricsSettings.currentColor === color ? 'ring-2 ring-white ring-offset-2 ring-offset-zinc-900' : ''
+              ]"
+              :style="{ backgroundColor: color }"
+            ></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -1391,6 +1719,31 @@ function updateProgress(e: TouchEvent | MouseEvent) {
   }
   100% {
     background-position: 0% 50%;
+  }
+}
+
+/* 唱针动画 */
+.needle-idle {
+  transform: rotate(0deg);
+  transition: transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.needle-playing {
+  animation: needle-wobble 3s ease-in-out infinite;
+}
+
+@keyframes needle-wobble {
+  0%, 100% {
+    transform: rotate(24deg);
+  }
+  25% {
+    transform: rotate(25.5deg);
+  }
+  50% {
+    transform: rotate(23.5deg);
+  }
+  75% {
+    transform: rotate(25deg);
   }
 }
 </style>

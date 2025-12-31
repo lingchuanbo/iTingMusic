@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { Track, PlayMode } from '@/types'
+import { audioCache } from '@/services/cache/AudioCache'
 
 const STORAGE_KEY = 'zen_player_data'
 
@@ -173,8 +174,36 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function clearPlaylist() {
+    // 删除所有歌曲的缓存
+    playlist.value.forEach(track => {
+      audioCache.delete(track.id)
+    })
     playlist.value = []
     currentIndex.value = -1
+  }
+
+  function removeTrack(index: number) {
+    if (index < 0 || index >= playlist.value.length) return
+    
+    const track = playlist.value[index]
+    // 删除该歌曲的缓存
+    audioCache.delete(track.id)
+    
+    playlist.value.splice(index, 1)
+    
+    // 调整当前索引
+    if (playlist.value.length === 0) {
+      currentIndex.value = -1
+      isPlaying.value = false
+    } else if (index < currentIndex.value) {
+      currentIndex.value--
+    } else if (index === currentIndex.value) {
+      // 删除的是当前播放的歌曲
+      if (currentIndex.value >= playlist.value.length) {
+        currentIndex.value = 0
+      }
+      playVersion.value++
+    }
   }
 
   function toggleBackgroundPlay() {
@@ -185,6 +214,6 @@ export const usePlayerStore = defineStore('player', () => {
     playlist, currentIndex, playVersion, isPlaying, currentTime, duration, buffered, isCached, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
-    setCurrentTime, setDuration, setBuffered, setCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, toggleBackgroundPlay
+    setCurrentTime, setDuration, setBuffered, setCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, removeTrack, toggleBackgroundPlay
   }
 })

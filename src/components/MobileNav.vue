@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { isSelectMode, isModalOpen } from '@/store/ui'
+import { useOfflineStore } from '@/store/offline'
 
 defineProps<{
   activeView: string
@@ -9,7 +11,10 @@ const emit = defineEmits<{
   navigate: [id: string]
 }>()
 
-const navItems = [
+const offlineStore = useOfflineStore()
+
+// 根据网络状态动态生成导航项
+const navItems = computed(() => [
   { 
     id: 'home', 
     label: '首页',
@@ -20,11 +25,18 @@ const navItems = [
     label: '播放',
     path: 'M4 6h16M4 10h16M4 14h16M4 18h16' 
   },
-  { 
-    id: 'myplaylist', 
-    label: '歌单',
-    path: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3' 
-  },
+  // 有网络显示歌单，无网络显示离线
+  offlineStore.isOnline 
+    ? { 
+        id: 'myplaylist', 
+        label: '歌单',
+        path: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3' 
+      }
+    : { 
+        id: 'offline', 
+        label: '离线',
+        path: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m4-5l5 5 5-5m-5 5V3' 
+      },
   { 
     id: 'favorite', 
     label: '喜欢',
@@ -35,7 +47,7 @@ const navItems = [
     label: '设置',
     path: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' 
   }
-]
+])
 </script>
 
 <template>

@@ -29,6 +29,16 @@ const newSongs = ref<SearchResult[]>([]) // 新歌速递 - 新歌榜
 const toplists = ref<ToplistItem[]>([])
 const currentBannerIndex = ref(0)
 
+// 播放状态 - 用于显示加载反馈
+const playingId = ref<string | null>(null)
+
+// Toast 提示
+const toast = ref({ show: false, message: '', type: 'success' as 'success' | 'error' })
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { show: true, message, type }
+  setTimeout(() => { toast.value.show = false }, 2000)
+}
+
 // 缓存配置 - 更新版本号强制刷新
 const CACHE_KEY = 'home_recommend_cache_v3'
 const CACHE_TIME_KEY = 'home_recommend_cache_time_v3'
@@ -199,25 +209,39 @@ async function loadRecommendData(forceRefresh = false) {
 }
 
 async function playSong(result: SearchResult) {
-  const track = searchResultToTrack(result)
-  const existingIndex = store.playlist.findIndex(t => t.id === track.id)
+  // 设置加载状态
+  playingId.value = result.id
+  
+  try {
+    const track = searchResultToTrack(result)
+    const existingIndex = store.playlist.findIndex(t => t.id === track.id)
 
-  if (existingIndex >= 0) {
-    store.playTrack(existingIndex)
-  } else {
-    store.addTrack(track)
-    store.playTrack(store.playlist.length - 1)
+    if (existingIndex >= 0) {
+      store.playTrack(existingIndex)
+    } else {
+      store.addTrack(track)
+      store.playTrack(store.playlist.length - 1)
+    }
+
+    // 显示播放提示
+    showToast(`正在播放「${result.name}」`, 'success')
+
+    getLyrics(result.platform, result.id).then(lrc => {
+      const t = store.playlist.find(t => t.id === track.id)
+      if (t) t.lrc = lrc
+    })
+  } catch (e) {
+    showToast('播放失败，请重试', 'error')
+  } finally {
+    // 延迟清除加载状态，让动画更流畅
+    setTimeout(() => { playingId.value = null }, 300)
   }
-
-  getLyrics(result.platform, result.id).then(lrc => {
-    const t = store.playlist.find(t => t.id === track.id)
-    if (t) t.lrc = lrc
-  })
 }
 
 function addToPlaylist(result: SearchResult) {
   const track = searchResultToTrack(result)
   store.addTrack(track)
+  showToast(`已添加「${result.name}」`, 'success')
 }
 
 function playAllHot() {
@@ -228,6 +252,7 @@ function playAllHot() {
   if (store.playlist.length > 0) {
     store.playTrack(store.playlist.length - hotSongs.value.length)
   }
+  showToast(`已添加 ${hotSongs.value.length} 首热歌`, 'success')
 }
 
 let bannerTimer: number | null = null
@@ -337,6 +362,27 @@ onUnmounted(() => {
     @touchmove.passive="handlePullMove"
     @touchend="handlePullEnd"
   >
+    <!-- Toast 提示 -->
+    <Transition name="toast">
+      <div v-if="toast.show" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-sm">
+        <div :class="['px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5 border', toast.type === 'success' ? 'bg-neutral-900/95 border-white/10 text-white' : 'bg-red-500/95 border-red-400/20 text-white']">
+          <!-- 成功图标 -->
+          <div v-if="toast.type === 'success'" class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <!-- 错误图标 -->
+          <div v-else class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </div>
+          <span class="text-sm font-medium truncate">{{ toast.message }}</span>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 下拉刷新指示器 -->
     <div 
       v-if="pullDistance > 0 || isRefreshing"
@@ -414,9 +460,10 @@ onUnmounted(() => {
                   </div>
                   <h2 class="text-white text-xl md:text-3xl font-bold mb-2 line-clamp-1 drop-shadow-lg">{{ song.name }}</h2>
                   <p class="text-white/80 text-sm md:text-base mb-4 drop-shadow">{{ song.artist }}</p>
-                  <button @click.stop="playSong(song)" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-purple-900 font-medium text-sm hover:bg-white/90 transition-colors shadow-lg shadow-white/20">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    立即播放
+                  <button @click.stop="playSong(song)" :disabled="playingId === song.id" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-purple-900 font-medium text-sm hover:bg-white/90 transition-colors shadow-lg shadow-white/20 disabled:opacity-80 active:scale-95">
+                    <svg v-if="playingId === song.id" class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    <svg v-else class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    {{ playingId === song.id ? '加载中' : '立即播放' }}
                   </button>
                 </div>
                 <div class="hidden md:block w-36 lg:w-44 h-36 lg:h-44 rounded-xl overflow-hidden shadow-2xl shadow-black/50 flex-shrink-0 rotate-3 hover:rotate-0 transition-transform duration-300 z-10">
@@ -496,6 +543,20 @@ onUnmounted(() => {
             </div>
           </div>
         </button>
+
+        <button @click="emit('navigate', 'offline')" class="quick-entry group flex-shrink-0 w-[72px] md:w-auto">
+          <div class="relative p-3 md:p-4 rounded-2xl bg-white/[0.08] backdrop-blur-sm border border-white/[0.08] hover:bg-white/[0.12] hover:border-white/[0.15] transition-all duration-300">
+            <div class="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500/20 via-transparent to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div class="relative flex flex-col items-center gap-2.5">
+              <div class="w-11 h-11 md:w-12 md:h-12 rounded-xl bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:shadow-indigo-500/50 group-hover:scale-110 group-active:scale-95 transition-all duration-300">
+                <svg class="w-5 h-5 md:w-6 md:h-6 text-white drop-shadow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m4-5l5 5 5-5m-5 5V3"/>
+                </svg>
+              </div>
+              <span class="text-white/70 text-[11px] md:text-xs font-medium group-hover:text-white transition-colors whitespace-nowrap">离线歌曲</span>
+            </div>
+          </div>
+        </button>
       </div>
 
       <!-- 正在播放卡片 -->
@@ -546,19 +607,24 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
-          <div v-for="(song, idx) in hotSongs" :key="song.id" @click="playSong(song)" class="group cursor-pointer">
+          <div v-for="(song, idx) in hotSongs" :key="song.id" @click="playSong(song)" :class="['group cursor-pointer transition-all duration-200', playingId === song.id ? 'scale-95 opacity-80' : 'active:scale-95']">
             <div class="relative aspect-square rounded-xl overflow-hidden bg-white/5 mb-2">
               <img :src="getSongCover(song)" class="absolute inset-0 w-full h-full object-cover" @error="($event.target as HTMLImageElement).style.display='none'" />
               <div :class="['absolute inset-0 -z-10', idx % 4 === 0 ? 'bg-gradient-to-br from-red-600 to-orange-600' : idx % 4 === 1 ? 'bg-gradient-to-br from-purple-600 to-pink-600' : idx % 4 === 2 ? 'bg-gradient-to-br from-blue-600 to-cyan-600' : 'bg-gradient-to-br from-green-600 to-teal-600']">
                 <div class="absolute inset-0 flex items-center justify-center text-5xl opacity-50">🔥</div>
               </div>
               <div v-if="idx < 3" :class="['absolute top-2 left-2 w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold shadow-lg', idx === 0 ? 'bg-gradient-to-br from-yellow-400 to-orange-500 text-black' : idx === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-400 text-black' : 'bg-gradient-to-br from-amber-600 to-amber-700 text-white']">{{ idx + 1 }}</div>
-              <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <!-- 加载中状态 -->
+              <div v-if="playingId === song.id" class="absolute inset-0 bg-black/60 flex items-center justify-center">
+                <div class="w-10 h-10 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <!-- hover 状态 -->
+              <div v-else class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <div class="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center group-hover:scale-110 transition-transform">
                   <svg class="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
               </div>
-              <button @click.stop="addToPlaylist(song)" class="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60">
+              <button @click.stop="addToPlaylist(song)" class="absolute bottom-2 right-2 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60 active:scale-90">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
               </button>
             </div>
@@ -577,14 +643,19 @@ onUnmounted(() => {
           </h3>
         </div>
         <div class="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-5 md:overflow-visible">
-          <div v-for="song in newSongs" :key="'new-'+song.id" @click="playSong(song)" class="flex-shrink-0 w-32 md:w-auto cursor-pointer group">
+          <div v-for="song in newSongs" :key="'new-'+song.id" @click="playSong(song)" :class="['flex-shrink-0 w-32 md:w-auto cursor-pointer group transition-all duration-200', playingId === song.id ? 'scale-95 opacity-80' : 'active:scale-95']">
             <div class="relative aspect-square rounded-2xl overflow-hidden bg-white/5 mb-2">
               <img :src="getSongCover(song)" class="w-full h-full object-cover" />
               <!-- NEW标识 -->
               <div class="absolute top-2 right-2">
                 <span class="px-1.5 py-0.5 rounded bg-cyan-500/80 text-white text-[10px] font-medium">NEW</span>
               </div>
-              <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <!-- 加载中状态 -->
+              <div v-if="playingId === song.id" class="absolute inset-0 bg-black/60 flex items-center justify-center">
+                <div class="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <!-- hover 状态 -->
+              <div v-else class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <div class="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
                   <svg class="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 </div>
@@ -633,6 +704,17 @@ onUnmounted(() => {
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Toast 动画 */
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -20px);
 }
 
 /* 正在播放卡片动态渐变背景 */

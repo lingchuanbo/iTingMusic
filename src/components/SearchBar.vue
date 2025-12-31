@@ -26,7 +26,7 @@ const keyword = ref('')
 
 // 搜索模式: normal 普通搜索, ai AI搜索
 type SearchMode = 'normal' | 'ai'
-const searchMode = ref<SearchMode>('normal')
+const searchMode = ref<SearchMode>('ai')
 const aiResponse = ref('') // AI 回复内容
 const thinkingText = ref('') // AI 思考过程
 
@@ -335,6 +335,7 @@ async function addToPlaylist(result: SearchResult) {
   store.addTrack(track)
   // 添加视觉反馈：短暂显示成功提示
   addedFeedback.value = getResultKey(result)
+  showToast(`已添加「${result.name}」`, 'success')
   setTimeout(() => {
     addedFeedback.value = ''
   }, 1000)
@@ -343,13 +344,33 @@ async function addToPlaylist(result: SearchResult) {
 // 添加成功反馈
 const addedFeedback = ref('')
 
+// 播放加载状态
+const playingId = ref<string | null>(null)
+
+// Toast 提示
+const toast = ref({ show: false, message: '', type: 'success' as 'success' | 'error' })
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { show: true, message, type }
+  setTimeout(() => { toast.value.show = false }, 2000)
+}
+
 async function playNow(result: SearchResult) {
-  const track = searchResultToTrack(result, quality.value)
-  const lrc = await getLyrics(result.platform, result.id)
-  track.lrc = lrc
-  store.addTrack(track)
-  store.playTrack(store.playlist.length - 1)
-  showResults.value = false
+  // 设置加载状态
+  playingId.value = getResultKey(result)
+  
+  try {
+    const track = searchResultToTrack(result, quality.value)
+    const lrc = await getLyrics(result.platform, result.id)
+    track.lrc = lrc
+    store.addTrack(track)
+    store.playTrack(store.playlist.length - 1)
+    showResults.value = false
+    showToast(`正在播放「${result.name}」`, 'success')
+  } catch (e) {
+    showToast('播放失败，请重试', 'error')
+  } finally {
+    setTimeout(() => { playingId.value = null }, 300)
+  }
 }
 
 function openFilePicker() {
@@ -383,6 +404,27 @@ function getPlatformIcon(platform: string) {
 
 <template>
   <div :class="['relative', popupOnly ? '' : 'p-4']">
+    <!-- Toast 提示 -->
+    <Transition name="toast">
+      <div v-if="toast.show" class="fixed top-16 left-1/2 -translate-x-1/2 z-[60] px-4 w-full max-w-sm">
+        <div :class="['px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5 border', toast.type === 'success' ? 'bg-neutral-900/95 border-white/10 text-white' : 'bg-red-500/95 border-red-400/20 text-white']">
+          <!-- 成功图标 -->
+          <div v-if="toast.type === 'success'" class="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <!-- 错误图标 -->
+          <div v-else class="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </div>
+          <span class="text-sm font-medium truncate">{{ toast.message }}</span>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 桌面端：完整搜索栏（非弹窗模式时显示） -->
     <div v-if="!popupOnly" class="hidden md:flex items-center gap-3">
       <!-- 搜索模式切换 -->
@@ -765,9 +807,11 @@ function getPlatformIcon(platform: string) {
                   :key="getResultKey(result)"
                   :class="[
                     'flex items-center gap-3 p-3 rounded-2xl transition-all',
-                    isSelectMode && selectedItems.has(getResultKey(result)) 
-                      ? 'bg-purple-600/20 border border-purple-500/30' 
-                      : 'hover:bg-white/5 active:bg-white/10 border border-transparent'
+                    playingId === getResultKey(result)
+                      ? 'bg-purple-600/20 border border-purple-500/30 scale-[0.98]'
+                      : isSelectMode && selectedItems.has(getResultKey(result)) 
+                        ? 'bg-purple-600/20 border border-purple-500/30' 
+                        : 'hover:bg-white/5 active:bg-white/10 active:scale-[0.98] border border-transparent'
                   ]"
                   @click="handleResultClick(result)"
                   @mousedown="startLongPress(result, $event)"
@@ -793,9 +837,10 @@ function getPlatformIcon(platform: string) {
                     </svg>
                   </div>
                   
-                  <!-- 序号/平台图标 -->
+                  <!-- 序号/加载状态 -->
                   <div v-if="!isSelectMode" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm flex-shrink-0">
-                    <span class="text-white/40">{{ index + 1 }}</span>
+                    <div v-if="playingId === getResultKey(result)" class="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
+                    <span v-else class="text-white/40">{{ index + 1 }}</span>
                   </div>
                   
                   <!-- 歌曲信息 -->
@@ -951,6 +996,17 @@ function getPlatformIcon(platform: string) {
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+/* Toast 动画 */
+.toast-enter-active,
+.toast-leave-active {
+  transition: all 0.3s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -20px);
 }
 
 .modal-enter-active {

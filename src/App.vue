@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, provide } from 'vue'
+import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
+import { Capacitor } from '@capacitor/core'
 import Sidebar from '@/components/Sidebar.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import SongList from '@/components/SongList.vue'
@@ -13,6 +14,7 @@ import PlaylistView from '@/components/PlaylistView.vue'
 import FavoriteView from '@/components/FavoriteView.vue'
 import WebDAVView from '@/components/WebDAVView.vue'
 import LocalView from '@/components/LocalView.vue'
+import OfflineView from '@/components/OfflineView.vue'
 import SettingsView from '@/components/SettingsView.vue'
 import MobileNav from '@/components/MobileNav.vue'
 import HomeView from '@/components/HomeView.vue'
@@ -20,6 +22,45 @@ import HomeView from '@/components/HomeView.vue'
 const store = usePlayerStore()
 const activeView = ref('home')
 const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
+
+// 处理原生返回键
+let backButtonListener: any = null
+
+onMounted(async () => {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      // 动态导入 @capacitor/app，避免未安装时报错
+      const { App: CapApp } = await import('@capacitor/app')
+      backButtonListener = await CapApp.addListener('backButton', () => {
+        // 优先关闭歌词面板
+        if (store.showLyrics) {
+          store.toggleLyrics()
+          return
+        }
+        // 关闭搜索弹窗
+        if (searchBarRef.value?.showMobileSearch) {
+          searchBarRef.value.showMobileSearch = false
+          return
+        }
+        // 如果在首页，退出应用
+        if (activeView.value === 'home') {
+          CapApp.exitApp()
+        } else {
+          // 返回首页
+          activeView.value = 'home'
+        }
+      })
+    } catch (e) {
+      console.warn('Capacitor App plugin not available:', e)
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (backButtonListener) {
+    backButtonListener.remove()
+  }
+})
 
 // AI选歌全屏模式
 const aiPickerFullscreen = ref(false)
@@ -124,6 +165,9 @@ provide('openGlobalSearch', openGlobalSearch)
 
         <!-- 本地音乐 -->
         <LocalView v-else-if="activeView === 'local'" />
+
+        <!-- 离线歌曲 -->
+        <OfflineView v-else-if="activeView === 'offline'" />
 
         <!-- 设置 -->
         <SettingsView v-else-if="activeView === 'settings'" />

@@ -1,13 +1,43 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { isSelectMode, isModalOpen } from '@/store/ui'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
+import DownloadButton from '@/components/DownloadButton.vue'
 
 const store = usePlayerStore()
 const showPlaylist = ref(false)
+
+// 歌曲切换高亮动画
+const isHighlighted = ref(false)
+const highlightPhase = ref<'idle' | 'flash' | 'glow'>('idle')
+let highlightTimer: number | null = null
+
+// 监听歌曲切换，触发高亮动画
+watch(() => store.playVersion, () => {
+  if (store.currentTrack) {
+    // 快速切换时重置动画
+    if (highlightTimer) {
+      clearTimeout(highlightTimer)
+    }
+    
+    // 先闪一下，再持续发光
+    highlightPhase.value = 'flash'
+    isHighlighted.value = true
+    
+    setTimeout(() => {
+      highlightPhase.value = 'glow'
+    }, 40)
+    
+    highlightTimer = window.setTimeout(() => {
+      highlightPhase.value = 'idle'
+      isHighlighted.value = false
+      highlightTimer = null
+    }, 300)
+  }
+})
 
 // 歌词显示开关
 const showLyrics = ref(false)
@@ -73,18 +103,12 @@ function playSong(index: number) {
 
 // 从列表移除
 function removeTrack(index: number) {
-  store.playlist.splice(index, 1)
-  if (store.currentIndex === index) {
-    store.currentIndex = -1
-  } else if (store.currentIndex > index) {
-    store.currentIndex--
-  }
+  store.removeTrack(index)
 }
 
 // 清空播放列表
 function clearPlaylist() {
-  store.playlist.splice(0, store.playlist.length)
-  store.currentIndex = -1
+  store.clearPlaylist()
   showPlaylist.value = false
 }
 </script>
@@ -94,10 +118,29 @@ function clearPlaylist() {
   <Transition name="player-bar">
     <div
       v-if="!isSelectMode && !isModalOpen"
-      class="fixed left-0 right-0 z-50 bg-zinc-900/98 backdrop-blur-xl border-t border-white/10 mobile-player-bar md:bottom-0"
+      :class="[
+        'fixed left-0 right-0 z-50 backdrop-blur-xl border-t mobile-player-bar md:bottom-0',
+        isHighlighted ? 'border-purple-500/60' : 'border-white/10',
+        highlightPhase === 'flash' ? 'song-flash' : highlightPhase === 'glow' ? 'song-glow' : 'bg-zinc-900/98'
+      ]"
     >
+      <!-- 高亮时的渐变背景层 -->
+      <div 
+        :class="[
+          'absolute inset-0 transition-opacity duration-300 pointer-events-none',
+          isHighlighted ? 'opacity-100' : 'opacity-0'
+        ]"
+      >
+        <div class="absolute inset-0 bg-gradient-to-r from-purple-600/30 via-pink-500/20 to-purple-600/30 highlight-shimmer"></div>
+      </div>
+      
+      <!-- 顶部光线扫过效果 -->
+      <div 
+        v-if="highlightPhase === 'flash'"
+        class="absolute top-0 left-0 right-0 h-0.5 light-sweep"
+      ></div>
     <!-- 进度条（顶部极细线） -->
-    <div class="h-0.5 bg-black/5 dark:bg-white/10 relative">
+    <div class="h-0.5 bg-black/5 dark:bg-white/10 relative z-10">
       <template v-if="store.currentTrack">
         <!-- 缓冲进度（深灰色） -->
         <div
@@ -119,15 +162,18 @@ function clearPlaylist() {
       </template>
     </div>
 
-    <div class="flex items-center gap-3 px-4 py-2">
+    <div class="flex items-center gap-3 px-4 py-2 relative z-10">
       <!-- 有歌曲时显示 -->
       <template v-if="store.currentTrack">
         <!-- 封面（圆形） -->
         <div
           @click="store.toggleLyrics()"
           :class="[
-            'w-10 h-10 rounded-full overflow-hidden flex-shrink-0 cursor-pointer border-2 border-purple-500/30',
-            store.isPlaying ? 'animate-spin-slow' : ''
+            'w-10 h-10 rounded-full overflow-hidden flex-shrink-0 cursor-pointer transition-all duration-300',
+            store.isPlaying ? 'animate-spin-slow' : '',
+            isHighlighted 
+              ? 'border-2 border-purple-400 shadow-lg shadow-purple-500/50 scale-110' 
+              : 'border-2 border-purple-500/30'
           ]"
         >
           <img
@@ -174,6 +220,13 @@ function clearPlaylist() {
           词
         </button>
 
+        <!-- 下载按钮 -->
+        <DownloadButton 
+          v-if="store.currentTrack?.source === 'online'" 
+          :track="store.currentTrack" 
+          size="sm"
+        />
+
         <!-- 播放/暂停按钮 -->
         <button
           @click="handleToggle"
@@ -217,7 +270,7 @@ function clearPlaylist() {
     <Transition name="playlist-popup">
       <div 
         v-if="showPlaylist"
-        class="absolute bottom-full left-0 right-0 mb-0 max-h-[60vh] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl"
+        class="absolute bottom-full left-0 right-0 mb-0 max-h-[60vh] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl z-10"
       >
         <!-- 标题栏 -->
         <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
@@ -295,12 +348,14 @@ function clearPlaylist() {
     </div>
   </Transition>
 
-  <!-- 点击外部关闭播放列表 -->
-  <div 
-    v-if="showPlaylist && !isSelectMode && !isModalOpen"
-    class="fixed inset-0 z-40"
-    @click="showPlaylist = false"
-  ></div>
+  <!-- 点击外部关闭播放列表 - 放在播放栏下面 -->
+  <Transition name="fade">
+    <div 
+      v-if="showPlaylist && !isSelectMode && !isModalOpen"
+      class="fixed inset-0 z-40 bg-black/20"
+      @click="showPlaylist = false"
+    ></div>
+  </Transition>
 </template>
 
 <style scoped>
@@ -348,6 +403,16 @@ function clearPlaylist() {
   transform: translateY(20px);
 }
 
+/* 遮罩层动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 /* 缓存完成小绿点动画 */
 .cache-dot-glow {
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.8);
@@ -391,5 +456,78 @@ function clearPlaylist() {
 .player-bar-leave-to {
   opacity: 0;
   transform: translateY(100%);
+}
+
+/* 歌曲切换 - 闪光阶段 */
+.song-flash {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(236, 72, 153, 0.3), rgba(168, 85, 247, 0.4));
+  animation: flash-pulse 0.04s ease-out;
+}
+
+@keyframes flash-pulse {
+  0% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.3);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+/* 歌曲切换 - 发光阶段 */
+.song-glow {
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.95), rgba(109, 40, 169, 0.9));
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 -4px 20px rgba(168, 85, 247, 0.3),
+    0 0 40px rgba(168, 85, 247, 0.15);
+  transition: all 0.15s ease-out;
+}
+
+/* 渐变背景流动效果 */
+.highlight-shimmer {
+  background-size: 200% 100%;
+  animation: shimmer 0.3s ease-in-out;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    background-position: -100% 0;
+    opacity: 0;
+  }
+}
+
+/* 顶部光线扫过效果 */
+.light-sweep {
+  background: linear-gradient(90deg, 
+    transparent 0%, 
+    rgba(255, 255, 255, 0.8) 45%, 
+    rgba(168, 85, 247, 1) 50%, 
+    rgba(255, 255, 255, 0.8) 55%, 
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: sweep 0.1s ease-out;
+}
+
+@keyframes sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 </style>

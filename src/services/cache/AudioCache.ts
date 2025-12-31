@@ -10,7 +10,7 @@ const META_STORE = 'cache_meta'
 const COVER_STORE = 'covers'
 const LYRICS_STORE = 'lyrics'
 
-interface CacheMeta {
+export interface CacheMeta {
   id: string
   size: number
   cachedAt: number
