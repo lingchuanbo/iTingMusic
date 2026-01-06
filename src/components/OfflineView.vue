@@ -35,12 +35,6 @@ function formatSize(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
-// 格式化时间
-function formatDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  return `${date.getMonth() + 1}/${date.getDate()}`
-}
-
 // 总缓存大小
 const totalSize = computed(() => {
   return cachedTracks.value.reduce((sum, t) => sum + t.size, 0)
