@@ -8,6 +8,15 @@ import { formatTime } from '@/utils/formatTime'
 import { audioCache } from '@/services/cache/AudioCache'
 import { trackStorage } from '@/services/TrackStorage'
 import { downloadService } from '@/services/DownloadService'
+import {
+  translateAndCacheLyrics,
+  getCachedTranslation,
+  loadTranslateConfig,
+  saveTranslateConfig,
+  type TranslateProvider,
+  type TargetLanguage
+} from '@/services/ai/LyricsTranslator'
+import { isAIConfigured } from '@/services/ai/AIService'
 
 const store = usePlayerStore()
 
@@ -42,6 +51,16 @@ const showLyrics = ref(false) // 是否显示歌词（点击切换）
 const displayMode = ref<'card' | 'vinyl'>('card') // 展示模式：卡片 / 黑胶唱片
 const showPlaylistDrawer = ref(false) // 播放列表抽屉
 const showLyricsSettings = ref(false) // 歌词设置面板
+
+// 歌词翻译相关
+const isTranslating = ref(false)
+const translatedLrc = ref<string | null>(null)
+const translationError = ref('')
+const lyricsDisplayMode = ref<'original' | 'translated' | 'bilingual'>('original')
+
+// 翻译 API 配置
+const translateConfig = ref(loadTranslateConfig())
+const showDeeplxKeyInput = ref(false) // 歌词显示模式
 
 // 歌词设置（从 localStorage 读取）
 interface LyricsSettings {
@@ -665,6 +684,133 @@ function updateProgress(e: TouchEvent | MouseEvent) {
   audioPlayer.seek(newTime)
   store.setCurrentTime(newTime)
 }
+
+// 歌词翻译相关
+const translatedLyrics = computed(() => {
+  if (!translatedLrc.value) return []
+  return parseLyrics(translatedLrc.value)
+})
+
+// 翻译歌词
+async function handleTranslateLyrics() {
+  if (!store.currentTrack?.lrc || isTranslating.value) return
+
+  // 检查配置
+  if (translateConfig.value.provider === 'builtin-ai' && !isAIConfigured()) {
+    translationError.value = '请先在设置中配置 AI'
+    return
+  }
+  if (translateConfig.value.provider === 'deeplx' && !translateConfig.value.deeplxKey) {
+    translationError.value = '请先配置 DeepLX API Key'
+    return
+  }
+
+  isTranslating.value = true
+  translationError.value = ''
+
+  try {
+    await translateAndCacheLyrics(store.currentTrack.id, store.currentTrack.lrc, {
+      onProgress: (text) => {
+        translatedLrc.value = text
+      },
+      onComplete: (translated) => {
+        translatedLrc.value = translated
+        if (lyricsDisplayMode.value === 'original') {
+          lyricsDisplayMode.value = 'bilingual'
+        }
+      },
+      onError: (error) => {
+        translationError.value = error
+      }
+    })
+  } catch (e: any) {
+    translationError.value = e.message || '翻译失败'
+  } finally {
+    isTranslating.value = false
+  }
+}
+
+// 切换翻译 API
+function setTranslateProvider(provider: TranslateProvider) {
+  translateConfig.value.provider = provider
+  saveTranslateConfig(translateConfig.value)
+}
+
+// 设置目标语言
+function setTargetLang(lang: TargetLanguage) {
+  translateConfig.value.targetLang = lang
+  saveTranslateConfig(translateConfig.value)
+}
+
+// 保存 DeepLX Key
+function saveDeeplxKey() {
+  saveTranslateConfig(translateConfig.value)
+  showDeeplxKeyInput.value = false
+}
+
+// 切换歌词显示模式
+function toggleLyricsDisplayMode() {
+  if (!translatedLrc.value) {
+    // 没有翻译时，触发翻译
+    handleTranslateLyrics()
+    return
+  }
+  // 循环切换：原文 -> 双语 -> 译文 -> 原文
+  const modes: Array<'original' | 'bilingual' | 'translated'> = ['original', 'bilingual', 'translated']
+  const currentIndex = modes.indexOf(lyricsDisplayMode.value)
+  lyricsDisplayMode.value = modes[(currentIndex + 1) % modes.length]
+}
+
+// 歌词显示模式文本
+const lyricsDisplayModeText = computed(() => {
+  const texts = {
+    original: '原文',
+    bilingual: '双语',
+    translated: '译文'
+  }
+  return texts[lyricsDisplayMode.value]
+})
+
+// 清除当前歌曲的翻译缓存
+function clearCurrentTranslation() {
+  if (!store.currentTrack) return
+  const key = `lyrics_translation_${store.currentTrack.id}_zh`
+  localStorage.removeItem(key)
+  translatedLrc.value = null
+  lyricsDisplayMode.value = 'original'
+}
+
+// 清除所有翻译缓存
+function clearAllTranslationCache() {
+  if (!confirm('确定清除所有歌词翻译缓存？')) return
+  const keysToRemove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key?.startsWith('lyrics_translation_')) {
+      keysToRemove.push(key)
+    }
+  }
+  keysToRemove.forEach((key) => localStorage.removeItem(key))
+  translatedLrc.value = null
+  lyricsDisplayMode.value = 'original'
+}
+
+// 切换歌曲时重置翻译状态
+watch(
+  () => store.currentTrack?.id,
+  async (newId) => {
+    if (newId) {
+      translatedLrc.value = null
+      translationError.value = ''
+      lyricsDisplayMode.value = 'original'
+      // 检查是否有缓存的翻译
+      const cached = await getCachedTranslation(newId, 'zh')
+      if (cached) {
+        translatedLrc.value = cached
+      }
+    }
+  }
+)
 </script>
 
 <template>
@@ -998,7 +1144,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
           <!-- 歌词视图 -->
           <div v-else key="lyrics" class="flex flex-col items-center w-full h-full pt-4 relative">
             <!-- 顶部歌曲信息 -->
-            <div class="flex items-center gap-3 px-4 mb-4 flex-shrink-0">
+            <div class="flex items-center gap-3 px-4 mb-4 flex-shrink-0 w-full">
               <div 
                 :class="[
                   'w-12 h-12 md:w-14 md:h-14 rounded-full overflow-hidden bg-white/10 flex-shrink-0 border-2 border-zinc-700',
@@ -1012,7 +1158,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                 />
                 <div v-else class="w-full h-full flex items-center justify-center text-xl">🎵</div>
               </div>
-              <div>
+              <div class="flex-1 min-w-0">
                 <p class="text-white font-medium text-sm md:text-base truncate max-w-[200px]">
                   {{ store.currentTrack.title }}
                 </p>
@@ -1020,6 +1166,30 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                   {{ store.currentTrack.artist }}
                 </p>
               </div>
+              <!-- 翻译按钮 -->
+              <button
+                @click.stop="toggleLyricsDisplayMode"
+                :disabled="isTranslating"
+                :class="[
+                  'px-3 py-1.5 rounded-full text-xs transition-all flex items-center gap-1.5',
+                  translatedLrc ? 'bg-purple-500/80 text-white' : 'bg-white/10 text-white/60 hover:bg-white/20 hover:text-white',
+                  isTranslating ? 'opacity-50' : ''
+                ]"
+              >
+                <svg v-if="isTranslating" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+                </svg>
+                {{ isTranslating ? '翻译中' : translatedLrc ? lyricsDisplayModeText : '翻译' }}
+              </button>
+            </div>
+
+            <!-- 翻译错误提示 -->
+            <div v-if="translationError" class="px-4 mb-2 flex-shrink-0">
+              <p class="text-red-400 text-xs bg-red-500/10 px-3 py-1.5 rounded-full">{{ translationError }}</p>
             </div>
 
             <!-- 歌词滚动区域 -->
@@ -1053,21 +1223,41 @@ function updateProgress(e: TouchEvent | MouseEvent) {
                 </button>
               </div>
               <div v-else ref="lyricsContainer" class="py-[40vh]">
-                <p
+                <div
                   v-for="(line, index) in lyrics"
                   :key="index"
                   :class="[
                     'transition-all duration-300 leading-relaxed py-3',
                     currentLyricIndex === index 
-                      ? 'text-white text-xl md:text-2xl font-bold' 
+                      ? 'text-white' 
                       : isUserScrolling && seekingLyricIndex === index
-                        ? 'text-purple-400 text-lg font-medium'
+                        ? 'text-purple-400'
                         : 'text-white/60'
                   ]"
                   :style="getLyricStyle(index)"
                 >
-                  {{ line.text || '♪' }}
-                </p>
+                  <!-- 原文歌词 -->
+                  <p 
+                    v-if="lyricsDisplayMode !== 'translated'"
+                    :class="[
+                      currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
+                      isUserScrolling && seekingLyricIndex === index ? 'text-lg font-medium' : ''
+                    ]"
+                  >
+                    {{ line.text || '♪' }}
+                  </p>
+                  <!-- 译文歌词 -->
+                  <p 
+                    v-if="(lyricsDisplayMode === 'bilingual' || lyricsDisplayMode === 'translated') && translatedLyrics[index]?.text"
+                    :class="[
+                      lyricsDisplayMode === 'translated' && currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
+                      lyricsDisplayMode === 'bilingual' ? 'text-sm mt-1 opacity-70' : '',
+                      isUserScrolling && seekingLyricIndex === index && lyricsDisplayMode === 'translated' ? 'text-lg font-medium' : ''
+                    ]"
+                  >
+                    {{ translatedLyrics[index]?.text }}
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -1375,7 +1565,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
       @click="showLyricsSettings = false"
     >
       <div 
-        class="w-full max-w-md bg-zinc-900 rounded-t-2xl p-4 pb-8"
+        class="w-full max-w-md bg-zinc-900 rounded-t-2xl p-4 pb-8 max-h-[80vh] overflow-y-auto"
         @click.stop
       >
         <div class="flex items-center justify-between mb-6">
@@ -1438,7 +1628,7 @@ function updateProgress(e: TouchEvent | MouseEvent) {
         </div>
         
         <!-- 当前歌词颜色 -->
-        <div class="py-3">
+        <div class="py-3 border-b border-white/10">
           <div class="flex items-center justify-between mb-3">
             <div>
               <p class="text-white text-sm">当前歌词颜色</p>
@@ -1457,6 +1647,208 @@ function updateProgress(e: TouchEvent | MouseEvent) {
               :style="{ backgroundColor: color }"
             ></button>
           </div>
+        </div>
+
+        <!-- 歌词翻译设置 -->
+        <div class="py-3">
+          <div class="flex items-center gap-2 mb-3">
+            <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+            </svg>
+            <p class="text-white text-sm font-medium">歌词翻译</p>
+          </div>
+
+          <!-- 翻译 API 选择 -->
+          <div class="mb-3">
+            <p class="text-white/50 text-xs mb-2">翻译接口</p>
+            <div class="flex flex-wrap gap-2">
+              <button 
+                @click="setTranslateProvider('builtin-ai')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.provider === 'builtin-ai' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                内置 AI
+              </button>
+              <button 
+                @click="setTranslateProvider('deeplx')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.provider === 'deeplx' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                DeepLX
+              </button>
+              <button 
+                @click="setTranslateProvider('google')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.provider === 'google' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                Google
+              </button>
+            </div>
+          </div>
+
+          <!-- DeepLX API Key 配置 -->
+          <div v-if="translateConfig.provider === 'deeplx'" class="mb-3">
+            <p class="text-white/50 text-xs mb-2">DeepLX API Key</p>
+            <div class="flex gap-2">
+              <input
+                v-model="translateConfig.deeplxKey"
+                type="password"
+                placeholder="输入 API Key"
+                class="flex-1 h-9 px-3 rounded-lg bg-white/10 text-white text-xs placeholder-white/30 outline-none focus:ring-1 focus:ring-purple-500"
+                @blur="saveDeeplxKey"
+              />
+            </div>
+            <p class="text-white/30 text-xs mt-1">格式: https://api.deeplx.org/&lt;key&gt;/translate</p>
+          </div>
+
+          <!-- 目标语言选择 -->
+          <div class="mb-3">
+            <p class="text-white/50 text-xs mb-2">目标语言</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                @click="setTargetLang('auto')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.targetLang === 'auto'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60'
+                ]"
+              >
+                自动
+              </button>
+              <button
+                @click="setTargetLang('zh')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.targetLang === 'zh'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60'
+                ]"
+              >
+                中文
+              </button>
+              <button
+                @click="setTargetLang('en')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.targetLang === 'en'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60'
+                ]"
+              >
+                英文
+              </button>
+              <button
+                @click="setTargetLang('ja')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.targetLang === 'ja'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60'
+                ]"
+              >
+                日文
+              </button>
+              <button
+                @click="setTargetLang('ko')"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  translateConfig.targetLang === 'ko'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60'
+                ]"
+              >
+                韩文
+              </button>
+            </div>
+            <p class="text-white/30 text-xs mt-1">自动：中文歌词翻译成英文，其他翻译成中文</p>
+          </div>
+
+          <!-- 翻译状态 -->
+          <div v-if="translatedLrc" class="flex items-center justify-between py-2 mb-2">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green-500"></span>
+              <span class="text-white/60 text-xs">已翻译</span>
+            </div>
+            <button
+              @click="clearCurrentTranslation"
+              class="text-red-400 text-xs hover:text-red-300 transition-colors"
+            >
+              清除翻译
+            </button>
+          </div>
+          <div v-else class="flex items-center gap-2 py-2 mb-2">
+            <span class="w-2 h-2 rounded-full bg-white/30"></span>
+            <span class="text-white/40 text-xs">未翻译</span>
+          </div>
+
+          <!-- 显示模式 -->
+          <div v-if="translatedLrc" class="mb-3">
+            <p class="text-white/50 text-xs mb-2">显示模式</p>
+            <div class="flex gap-2">
+              <button 
+                @click="lyricsDisplayMode = 'original'"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  lyricsDisplayMode === 'original' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                原文
+              </button>
+              <button 
+                @click="lyricsDisplayMode = 'bilingual'"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  lyricsDisplayMode === 'bilingual' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                双语
+              </button>
+              <button 
+                @click="lyricsDisplayMode = 'translated'"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-colors',
+                  lyricsDisplayMode === 'translated' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/60'
+                ]"
+              >
+                译文
+              </button>
+            </div>
+          </div>
+
+          <!-- 翻译按钮 -->
+          <button
+            v-if="!translatedLrc && store.currentTrack?.lrc"
+            @click="handleTranslateLyrics"
+            :disabled="isTranslating"
+            class="w-full py-2.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <svg v-if="isTranslating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+            </svg>
+            {{ isTranslating ? '翻译中...' : '翻译当前歌词' }}
+          </button>
+
+          <!-- 错误提示 -->
+          <p v-if="translationError" class="text-red-400 text-xs mt-2">{{ translationError }}</p>
+
+          <!-- 清除所有翻译缓存 -->
+          <button
+            @click="clearAllTranslationCache"
+            class="w-full mt-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 text-xs transition-colors"
+          >
+            清除所有翻译缓存
+          </button>
         </div>
       </div>
     </div>
