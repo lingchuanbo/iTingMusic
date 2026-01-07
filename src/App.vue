@@ -25,6 +25,7 @@ const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
 // 处理原生返回键
 let backButtonListener: any = null
+import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer } from '@/store/ui'
 
 onMounted(async () => {
   if (Capacitor.isNativePlatform()) {
@@ -32,23 +33,37 @@ onMounted(async () => {
       // 动态导入 @capacitor/app，避免未安装时报错
       const { App: CapApp } = await import('@capacitor/app')
       backButtonListener = await CapApp.addListener('backButton', () => {
-        // 优先关闭歌词面板
+        // 优先级 1: 关闭播放器内的弹窗（播放列表、歌单选择器等）
+        if (closePlayerPopups()) {
+          return
+        }
+        
+        // 优先级 2: 关闭歌词面板（歌词面板比播放器优先，返回到播放页面）
         if (store.showLyrics) {
           store.toggleLyrics()
           return
         }
-        // 关闭搜索弹窗
+        
+        // 优先级 3: 如果播放器已展开，收起播放器
+        if (playerExpanded.value) {
+          collapsePlayer()
+          return
+        }
+        
+        // 优先级 4: 关闭搜索弹窗
         if (searchBarRef.value?.showMobileSearch) {
           searchBarRef.value.showMobileSearch = false
           return
         }
-        // 如果在首页，退出应用
-        if (activeView.value === 'home') {
-          CapApp.exitApp()
-        } else {
-          // 返回首页
+        
+        // 优先级 5: 如果不在首页，返回首页
+        if (activeView.value !== 'home') {
           activeView.value = 'home'
+          return
         }
+        
+        // 优先级 6: 在首页时退出应用
+        CapApp.exitApp()
       })
     } catch (e) {
       console.warn('Capacitor App plugin not available:', e)
@@ -76,14 +91,13 @@ watch(activeView, (newView) => {
 const isSearchOpen = computed(() => searchBarRef.value?.showMobileSearch ?? false)
 
 // 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏）
-import { isPlayerExpanded } from '@/store/ui'
-const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value && !isPlayerExpanded.value)
+const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value)
 
 // 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏）
 const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value)
 
-// 是否显示底部导航（AI全屏时隐藏，播放器展开时隐藏）
-const showMobileNav = computed(() => !aiPickerFullscreen.value && !isPlayerExpanded.value)
+// 是否显示底部导航（搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏）
+const showMobileNav = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value)
 
 // 动态背景
 const bgStyle = computed(() => {

@@ -153,16 +153,6 @@ async function loadRecommendData(forceRefresh = false) {
       getToplists('netease').catch(e => { console.warn('排行榜列表失败:', e); return [] })
     ])
 
-    console.log('API 返回数据:', {
-      neteaseSurge: neteaseSurge.length,
-      qqSurge: qqSurge.length,
-      neteaseHot: neteaseHot.length,
-      qqHot: qqHot.length,
-      neteaseNew: neteaseNew.length,
-      qqNew: qqNew.length,
-      toplistData: toplistData.length
-    })
-
     // 去重函数
     const dedup = (songs: SearchResult[]) => {
       const seen = new Set<string>()

@@ -30,14 +30,14 @@ const searchMode = ref<SearchMode>('ai')
 const aiResponse = ref('') // AI 回复内容
 const thinkingText = ref('') // AI 思考过程
 
-// AI 快捷提示
+// AI 快捷提示（移除emoji，使用纯文本标签）
 const quickPrompts = [
-  { icon: '🌿', label: '放松', prompt: '推荐放松的音乐' },
-  { icon: '💼', label: '工作', prompt: '推荐适合工作听的音乐' },
-  { icon: '🏃', label: '运动', prompt: '推荐适合运动的音乐' },
-  { icon: '🌙', label: '睡前', prompt: '推荐适合睡前听的音乐' },
-  { icon: '😢', label: '伤感', prompt: '推荐伤感的歌曲' },
-  { icon: '🎉', label: '嗨歌', prompt: '推荐嗨起来的歌' }
+  { label: '放松', prompt: '推荐放松的音乐' },
+  { label: '工作', prompt: '推荐适合工作听的音乐' },
+  { label: '运动', prompt: '推荐适合运动的音乐' },
+  { label: '睡前', prompt: '推荐适合睡前听的音乐' },
+  { label: '伤感', prompt: '推荐伤感的歌曲' },
+  { label: '嗨歌', prompt: '推荐嗨起来的歌' }
 ]
 
 // 实时显示简拼转换提示
@@ -392,13 +392,13 @@ async function handleFileSelect(e: Event) {
 
 function getPlatformIcon(platform: string) {
   const icons: Record<string, string> = {
-    netease: '🎵',
-    kuwo: '🎶',
-    kugou: '🎤',
-    qq: '🎧',
-    migu: '📻'
+    netease: '网易',
+    kuwo: '酷我',
+    kugou: '酷狗',
+    qq: 'QQ',
+    migu: '咪咕'
   }
-  return icons[platform] || '🎵'
+  return icons[platform] || platform
 }
 </script>
 
@@ -493,7 +493,7 @@ function getPlatformIcon(platform: string) {
               @click="useQuickPrompt(p.prompt)"
               class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs transition-all"
             >
-              {{ p.icon }} {{ p.label }}
+              {{ p.label }}
             </button>
           </div>
         </Transition>
@@ -601,83 +601,93 @@ function getPlatformIcon(platform: string) {
       @click="showResults = false"
     ></div>
 
-    <!-- 搜索浮窗（移动端底部弹出，桌面端居中弹窗） -->
-    <Transition name="modal">
+    <!-- 搜索浮窗（全屏风格，与播放页面一致） -->
+    <Transition name="slide">
       <div 
         v-if="showMobileSearch"
-        class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center"
-        @click.self="showMobileSearch = false"
+        class="fixed inset-0 z-50 flex flex-col overflow-hidden"
       >
-        <!-- 搜索面板 -->
-        <div class="w-full md:w-[520px] md:max-w-[90vw] max-h-[90vh] md:max-h-[85vh] bg-gradient-to-b from-neutral-900 to-neutral-950 backdrop-blur-xl rounded-t-[28px] md:rounded-[28px] flex flex-col overflow-hidden md:shadow-2xl border-t border-white/10 md:border md:border-white/10">
-          
-          <!-- 顶部区域：拖动条 + AI状态 -->
-          <div class="relative">
-            <!-- 拖动指示条（移动端） -->
-            <div class="flex justify-center pt-2.5 pb-1 md:hidden">
-              <div class="w-9 h-1 rounded-full bg-white/25"></div>
-            </div>
-            
-            <!-- AI 状态区域（顶部统一显示，包括思考中和结果） -->
-            <Transition name="ai-status">
-              <div 
-                v-if="searchMode === 'ai' && aiResponse"
-                class="px-4 py-3 bg-gradient-to-r from-purple-600/20 via-purple-500/10 to-transparent"
-              >
-                <div class="flex items-center gap-3">
-                  <div class="relative flex-shrink-0">
-                    <div class="w-8 h-8 rounded-full bg-purple-600/30 flex items-center justify-center">
-                      <span class="text-base">✨</span>
-                    </div>
-                    <div v-if="loading" class="absolute inset-0 rounded-full border-2 border-purple-400 border-t-transparent animate-spin"></div>
-                  </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-white/90 text-sm font-medium leading-relaxed">{{ aiResponse }}</p>
-                    <p v-if="loading && thinkingText" class="text-white/50 text-xs mt-0.5 truncate">{{ thinkingText }}</p>
-                  </div>
+        <!-- 动态模糊背景 -->
+        <div class="absolute inset-0 z-0">
+          <div 
+            v-if="store.currentTrack?.cover"
+            class="absolute inset-0 bg-cover bg-center transition-all duration-1000"
+            :style="{ backgroundImage: `url(${store.currentTrack.cover})` }"
+          ></div>
+          <div class="absolute inset-0 bg-black/80 backdrop-blur-3xl"></div>
+        </div>
+
+        <!-- 顶部栏 -->
+        <div class="flex items-center justify-between px-4 pt-safe-top pb-2 flex-shrink-0 relative z-10">
+          <button 
+            @click="showMobileSearch = false"
+            class="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+          <div class="flex-1 text-center">
+            <p class="text-white font-medium text-sm">搜索音乐</p>
+            <p class="text-white/50 text-xs">{{ searchMode === 'ai' ? 'AI 智能推荐' : '精准搜索' }}</p>
+          </div>
+          <div class="w-10"></div>
+        </div>
+
+        <!-- AI 状态区域 -->
+        <Transition name="ai-status">
+          <div 
+            v-if="searchMode === 'ai' && aiResponse"
+            class="px-4 py-3 bg-gradient-to-r from-purple-600/20 via-purple-500/10 to-transparent flex-shrink-0 relative z-10"
+          >
+            <div class="flex items-center gap-3">
+              <div class="relative flex-shrink-0">
+                <div class="w-8 h-8 rounded-full bg-purple-600/30 flex items-center justify-center">
+                  <svg class="w-4 h-4 text-purple-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>
+                  </svg>
                 </div>
+                <div v-if="loading" class="absolute inset-0 rounded-full border-2 border-purple-400 border-t-transparent animate-spin"></div>
               </div>
-            </Transition>
-            
-            <!-- 桌面端标题栏 -->
-            <div class="hidden md:flex items-center justify-between px-5 pt-4 pb-2">
-              <h3 class="text-white font-semibold text-lg">搜索音乐</h3>
-              <button 
-                @click="showMobileSearch = false"
-                class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/60 transition-all hover:rotate-90"
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              </button>
+              <div class="flex-1 min-w-0">
+                <p class="text-white/90 text-sm font-medium leading-relaxed">{{ aiResponse }}</p>
+                <p v-if="loading && thinkingText" class="text-white/50 text-xs mt-0.5 truncate">{{ thinkingText }}</p>
+              </div>
             </div>
           </div>
-          
-          <!-- 搜索栏 -->
-          <div class="px-4 pt-2 pb-3">
-            <!-- 搜索模式切换 -->
-            <div class="flex rounded-2xl bg-white/5 p-1 mb-3">
+        </Transition>
+
+        <!-- 搜索区域 -->
+        <div class="px-4 pt-2 pb-4 flex-shrink-0 relative z-10">
+          <!-- 搜索模式切换 -->
+          <div class="flex rounded-2xl bg-white/5 p-1 mb-3">
               <button
                 @click="searchMode = 'normal'"
                 :class="[
-                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
+                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2',
                   searchMode === 'normal' 
                     ? 'bg-white/15 text-white shadow-sm' 
                     : 'text-white/50 hover:text-white/70'
                 ]"
               >
-                🔍 普通搜索
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                普通搜索
               </button>
               <button
                 @click="searchMode = 'ai'"
                 :class="[
-                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all',
+                  'flex-1 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2',
                   searchMode === 'ai' 
                     ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-lg shadow-purple-500/25' 
                     : 'text-white/50 hover:text-white/70'
                 ]"
               >
-                ✨ AI 搜索
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>
+                </svg>
+                AI 搜索
               </button>
             </div>
 
@@ -743,7 +753,7 @@ function getPlatformIcon(platform: string) {
                     @click="useQuickPrompt(p.prompt)"
                     class="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 active:bg-white/15 text-white/70 text-sm transition-all border border-white/5"
                   >
-                    {{ p.icon }} {{ p.label }}
+                    {{ p.label }}
                   </button>
                 </div>
               </div>
@@ -766,12 +776,11 @@ function getPlatformIcon(platform: string) {
                 >
                   {{ q.label }}
                 </button>
-              </div>
             </div>
           </div>
 
-          <!-- 搜索结果 -->
-          <div class="flex-1 overflow-y-auto min-h-[180px] max-h-[55vh]">
+        <!-- 搜索结果 -->
+          <div class="flex-1 overflow-y-auto min-h-[180px] relative z-10">
             <!-- 加载状态 -->
             <div v-if="loading && searchMode !== 'ai'" class="flex flex-col items-center justify-center py-16">
               <div class="w-10 h-10 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
@@ -787,16 +796,23 @@ function getPlatformIcon(platform: string) {
             <!-- 空状态 -->
             <div v-if="!loading && searchResults.length === 0 && !aiResponse" class="flex flex-col items-center justify-center py-12 text-white/40">
               <div class="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
-                <span class="text-3xl">{{ searchMode === 'ai' ? '✨' : '🎵' }}</span>
+                <!-- AI模式使用星星图标 -->
+                <svg v-if="searchMode === 'ai'" class="w-8 h-8 text-purple-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2l2.4 7.2H22l-6 4.8 2.4 7.2L12 16l-6.4 5.2 2.4-7.2-6-4.8h7.6z"/>
+                </svg>
+                <!-- 普通模式使用音乐图标 -->
+                <svg v-else class="w-8 h-8 text-white/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
+                </svg>
               </div>
               <p class="text-sm">{{ searchMode === 'ai' ? '描述你的心情或场景' : '输入关键词搜索歌曲' }}</p>
               <p class="text-xs text-white/30 mt-1">长按歌曲可多选</p>
             </div>
             
             <!-- 搜索结果列表 -->
-            <div v-if="searchResults.length > 0" class="px-3 pb-4">
+            <div v-if="searchResults.length > 0" class="px-4 pb-4">
               <!-- 结果数量提示 -->
-              <div v-if="!isSelectMode && searchResults.length > 0" class="px-2 py-1.5 mb-2">
+              <div v-if="!isSelectMode && searchResults.length > 0" class="py-2 mb-1">
                 <span class="text-white/40 text-xs">找到 {{ searchResults.length }} 首歌曲</span>
               </div>
               
@@ -838,7 +854,7 @@ function getPlatformIcon(platform: string) {
                   </div>
                   
                   <!-- 序号/加载状态 -->
-                  <div v-if="!isSelectMode" class="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm flex-shrink-0">
+                  <div v-if="!isSelectMode" class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-sm flex-shrink-0">
                     <div v-if="playingId === getResultKey(result)" class="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin"></div>
                     <span v-else class="text-white/40">{{ index + 1 }}</span>
                   </div>
@@ -876,7 +892,7 @@ function getPlatformIcon(platform: string) {
           </div>
           
           <!-- 批量操作栏（多选模式）- 与播放列表样式一致 -->
-          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-4 pt-2 border-t border-white/5">
+          <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-safe-bottom pt-2 border-t border-white/5 relative z-10 flex-shrink-0">
             <div class="rounded-2xl bg-neutral-800/90 backdrop-blur-xl border border-white/10 overflow-hidden">
               <!-- 顶部信息栏 -->
               <div class="flex items-center justify-between px-4 py-2.5 border-b border-white/5">
@@ -955,31 +971,31 @@ function getPlatformIcon(platform: string) {
           </Transition>
           
           <!-- 底部操作栏（非多选模式） -->
-          <div v-if="!isSelectMode || selectedItems.size === 0" class="px-4 pb-5 pt-2 border-t border-white/5">
+          <div v-if="!isSelectMode || selectedItems.size === 0" class="px-4 pb-safe-bottom pt-2 border-t border-white/5 relative z-10 flex-shrink-0">
             <div class="flex gap-2">
-              <!-- 换一批按钮 -->
+              <!-- 返回按钮（有搜索结果时显示） -->
               <button
                 v-if="searchResults.length > 0 && !loading"
-                @click="handleSearch"
+                @click="searchResults = []; keyword = ''; aiResponse = ''"
                 class="flex-1 h-11 rounded-2xl bg-white/5 hover:bg-white/10 text-white/60 font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-all border border-white/5"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
                 </svg>
-                换一批
+                返回
               </button>
               <!-- 关闭按钮 -->
               <button
                 @click="showMobileSearch = false"
                 :class="[
-                  'h-11 rounded-2xl bg-white/10 text-white/60 font-medium active:scale-[0.98] transition-all',
-                  searchResults.length > 0 && !loading ? 'w-11 flex items-center justify-center' : 'flex-1'
+                  'h-11 rounded-2xl bg-white/10 hover:bg-white/15 text-white/60 font-medium active:scale-[0.98] transition-all',
+                  searchResults.length > 0 && !loading ? 'w-11 flex items-center justify-center' : 'flex-1 flex items-center justify-center gap-2'
                 ]"
               >
-                <svg v-if="searchResults.length > 0 && !loading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                 </svg>
-                <span v-else>关闭</span>
+                <span v-if="!(searchResults.length > 0 && !loading)">关闭</span>
               </button>
             </div>
           </div>
@@ -990,6 +1006,22 @@ function getPlatformIcon(platform: string) {
 </template>
 
 <style scoped>
+/* 全屏滑动动画 */
+.slide-enter-active {
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slide-leave-active {
+  transition: all 0.25s ease-in;
+}
+.slide-enter-from {
+  opacity: 0;
+  transform: translateY(100%);
+}
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(100%);
+}
+
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.2s, transform 0.2s;
 }
@@ -1007,41 +1039,6 @@ function getPlatformIcon(platform: string) {
 .toast-leave-to {
   opacity: 0;
   transform: translate(-50%, -20px);
-}
-
-.modal-enter-active {
-  transition: opacity 0.3s ease-out;
-}
-.modal-enter-active > div {
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.modal-leave-active {
-  transition: opacity 0.2s ease-in;
-}
-.modal-leave-active > div {
-  transition: transform 0.2s ease-in;
-}
-.modal-enter-from {
-  opacity: 0;
-}
-.modal-enter-from > div {
-  transform: translateY(100%);
-}
-.modal-leave-to {
-  opacity: 0;
-}
-.modal-leave-to > div {
-  transform: translateY(100%);
-}
-
-/* 桌面端弹窗动画 */
-@media (min-width: 768px) {
-  .modal-enter-from > div {
-    transform: translateY(20px) scale(0.95);
-  }
-  .modal-leave-to > div {
-    transform: translateY(20px) scale(0.95);
-  }
 }
 
 .hint-enter-active,
@@ -1068,5 +1065,13 @@ function getPlatformIcon(platform: string) {
 .ai-status-leave-to {
   opacity: 0;
   transform: translateY(-10px);
+}
+
+/* 安全区域支持 */
+.pt-safe-top {
+  padding-top: max(env(safe-area-inset-top, 0px), 12px);
+}
+.pb-safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
 }
 </style>

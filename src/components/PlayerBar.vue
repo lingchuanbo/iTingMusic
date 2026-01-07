@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
-import { isSelectMode, isModalOpen, setPlayerExpanded } from '@/store/ui'
+import { isSelectMode, isModalOpen, setPlayerExpanded, showPlaylist, showPlaylistPicker, registerCollapsePlayer } from '@/store/ui'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { trackStorage } from '@/services/TrackStorage'
+import CachedImage from '@/components/common/CachedImage.vue'
 
 const store = usePlayerStore()
-const showPlaylist = ref(false)
 const playlistDragY = ref(0)
 const isDraggingPlaylist = ref(false)
 let playlistTouchStartY = 0
@@ -43,8 +43,7 @@ function toggleFavorite() {
   favoriteVersion.value++
 }
 
-// Playlist picker
-const showPlaylistPicker = ref(false)
+// Playlist picker (使用全局状态 showPlaylistPicker)
 
 const userPlaylists = computed(() => {
   const data = localStorage.getItem('zen_playlists')
@@ -154,6 +153,11 @@ onMounted(() => {
   if (saved !== null) {
     showLyrics.value = saved === 'true'
   }
+  
+  // 注册收起播放器的回调，用于返回键处理
+  registerCollapsePlayer(() => {
+    sheetOffset.value = 0
+  })
 })
 
 onUnmounted(() => {
@@ -194,7 +198,7 @@ const containerStyle = computed(() => {
   if (isDragging.value) {
     style.transition = 'none'
   } else {
-    style.transition = 'all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' 
+    style.transition = 'all 0.28s cubic-bezier(0.25, 1.15, 0.5, 1)' 
   }
   
   return style
@@ -237,7 +241,7 @@ const floatingCoverStyle = computed(() => {
     position: 'absolute', 
     zIndex: 20,
     willChange: 'width, height, left, bottom, border-radius',
-    transition: isDragging.value ? 'none' : 'all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+    transition: isDragging.value ? 'none' : 'all 0.28s cubic-bezier(0.25, 1.15, 0.5, 1)',
   } as any
 })
 
@@ -267,16 +271,23 @@ const expandedControlStyle = computed(() => {
 // Gesture Logic
 // -------------------------------------------------------------
 
+// 速度感知变量
+let lastTouchY = 0
+let lastTouchTime = 0
+let velocity = 0
+
 function handleTouchStart(e: TouchEvent) {
   if (isSelectMode.value || isModalOpen.value) return
-  
-  // 只有在 mini bar 区域或者 expanded 下拉区域开始触摸才有效？
-  // Simple: Handle everywhere on the container.
   
   isDragging.value = true
   dragStartY.value = e.touches[0].clientY
   dragStartX.value = e.touches[0].clientX
   dragStartSheetOffset.value = sheetOffset.value
+  
+  // 初始化速度追踪
+  lastTouchY = e.touches[0].clientY
+  lastTouchTime = Date.now()
+  velocity = 0
   
   isAxisLocked.value = false
   lockedAxis.value = null
@@ -285,8 +296,18 @@ function handleTouchStart(e: TouchEvent) {
 function handleTouchMove(e: TouchEvent) {
   if (!isDragging.value) return
 
-  const dy = e.touches[0].clientY - dragStartY.value
+  const currentY = e.touches[0].clientY
+  const currentTime = Date.now()
+  const dy = currentY - dragStartY.value
   const dx = e.touches[0].clientX - dragStartX.value
+
+  // 计算速度 (px/ms)
+  const timeDelta = currentTime - lastTouchTime
+  if (timeDelta > 0) {
+    velocity = (lastTouchY - currentY) / timeDelta
+  }
+  lastTouchY = currentY
+  lastTouchTime = currentTime
 
   // Axis Locking
   if (!isAxisLocked.value) {
@@ -306,7 +327,9 @@ function handleTouchMove(e: TouchEvent) {
   const deltaHeight = -dy
   const maxDragDistance = screenHeight.value - COLLAPSED_HEIGHT
   
-  let newProgress = dragStartSheetOffset.value + deltaHeight / maxDragDistance
+  // 增加拖拽灵敏度 1.5 倍，让单手操作更轻松
+  const sensitivity = 1.5
+  let newProgress = dragStartSheetOffset.value + (deltaHeight * sensitivity) / maxDragDistance
   newProgress = Math.max(0, Math.min(1, newProgress))
   sheetOffset.value = newProgress
 }
@@ -317,11 +340,29 @@ function handleTouchEnd() {
 
   const endProgress = sheetOffset.value
   
-  // Threshold
-  if (endProgress > 0.3) {
+  // 速度阈值：快速滑动时更容易触发
+  const velocityThreshold = 0.3 // px/ms
+  const isQuickSwipeUp = velocity > velocityThreshold
+  const isQuickSwipeDown = velocity < -velocityThreshold
+  
+  // 基于位置和速度的智能判断
+  if (isQuickSwipeUp) {
+    // 快速向上滑动 -> 展开
     sheetOffset.value = 1
-  } else {
+  } else if (isQuickSwipeDown) {
+    // 快速向下滑动 -> 收起
     sheetOffset.value = 0
+  } else {
+    // 慢速滑动，使用更低的阈值
+    // 展开阈值：12%（从收起状态拉开）
+    // 收起阈值：70%（从展开状态往下拉）
+    if (dragStartSheetOffset.value < 0.5) {
+      // 从收起状态开始拖拽
+      sheetOffset.value = endProgress > 0.12 ? 1 : 0
+    } else {
+      // 从展开状态开始拖拽
+      sheetOffset.value = endProgress > 0.7 ? 1 : 0
+    }
   }
 }
 
@@ -476,11 +517,11 @@ function clearPlaylist() {
         :style="floatingCoverStyle"
         class="overflow-hidden flex-shrink-0 bg-zinc-800"
       >
-        <img
+        <CachedImage
           v-if="store.currentTrack.cover"
           :src="store.currentTrack.cover"
           :alt="store.currentTrack.title"
-          class="w-full h-full object-cover"
+          class="w-full h-full"
         />
         <div v-else class="w-full h-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center">
           <span class="text-purple-500 text-2xl">🎵</span>

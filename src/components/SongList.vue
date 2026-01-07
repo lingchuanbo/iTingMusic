@@ -6,6 +6,7 @@ import { setSelectMode } from '@/store/ui'
 import { formatTime } from '@/utils/formatTime'
 import { trackStorage } from '@/services/TrackStorage'
 import DownloadButton from '@/components/DownloadButton.vue'
+import CachedImage from '@/components/common/CachedImage.vue'
 
 type ViewMode = 'list' | 'grid' | 'compact'
 
@@ -366,7 +367,7 @@ function clearPlaylist() {
           </svg>
         </div>
         <div class="relative w-12 h-12 rounded-lg overflow-hidden bg-white/10 flex-shrink-0">
-          <img v-if="track.cover" :src="track.cover" :alt="track.title" class="w-full h-full object-cover" />
+          <CachedImage v-if="track.cover" :src="track.cover" :alt="track.title" class="w-full h-full" />
           <div v-else class="w-full h-full flex items-center justify-center text-2xl">🎵</div>
           <div v-if="store.currentIndex === index && store.isPlaying" class="absolute inset-0 bg-black/40 flex items-center justify-center">
             <div class="flex gap-0.5">
@@ -420,7 +421,7 @@ function clearPlaylist() {
         ]"
       >
         <div class="relative aspect-square rounded-md md:rounded-lg overflow-hidden bg-white/10 mb-1.5 md:mb-3">
-          <img v-if="track.cover" :src="track.cover" :alt="track.title" class="w-full h-full object-cover" />
+          <CachedImage v-if="track.cover" :src="track.cover" :alt="track.title" class="w-full h-full" />
           <div v-else class="w-full h-full flex items-center justify-center text-2xl md:text-4xl bg-gradient-to-br from-purple-600/50 to-pink-600/50">🎵</div>
           <!-- 多选框 -->
           <div v-if="isSelectMode" class="absolute top-1 left-1 md:top-2 md:left-2 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center"

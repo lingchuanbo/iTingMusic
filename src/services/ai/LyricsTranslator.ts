@@ -10,6 +10,7 @@ export type TargetLanguage = 'auto' | 'zh' | 'en' | 'ja' | 'ko'
 export interface TranslateConfig {
   provider: TranslateProvider
   deeplxKey?: string
+  deeplxBaseUrl?: string // DeepLX API 地址
   targetLang: TargetLanguage // 目标语言，auto 表示自动检测
 }
 
@@ -54,7 +55,7 @@ interface LyricLine {
 }
 
 // 检测文本主要语言
-function detectLanguage(text: string): 'zh' | 'en' | 'ja' | 'ko' | 'other' {
+export function detectLanguage(text: string): 'zh' | 'en' | 'ja' | 'ko' | 'other' {
   // 移除标点和空格
   const cleanText = text.replace(/[\s\p{P}]/gu, '')
   if (!cleanText) return 'other'
@@ -87,24 +88,26 @@ function detectLanguage(text: string): 'zh' | 'en' | 'ja' | 'ko' | 'other' {
   const total = zhCount + enCount + jaCount + koCount
   if (total === 0) return 'other'
 
-  // 判断主要语言（占比超过 50%）
-  if (jaCount / total > 0.3) return 'ja' // 日文优先（因为可能混有汉字）
-  if (koCount / total > 0.5) return 'ko'
-  if (zhCount / total > 0.5) return 'zh'
-  if (enCount / total > 0.5) return 'en'
+  // 计算占比
+  const zhRatio = zhCount / total
+  const jaRatio = jaCount / total
+  const koRatio = koCount / total
 
-  // 如果有日文假名，判定为日文
-  if (jaCount > 0) return 'ja'
-  // 如果有中文字符，判定为中文
-  if (zhCount > 0) return 'zh'
+  // 优先级：韩文 > 日文 > 中文 > 英文
+  if (koCount > 0 && (koRatio > 0.1 || koCount > 1)) return 'ko'
+  if (jaCount > 0 && (jaRatio > 0.1 || jaCount > 1)) return 'ja'
+  if (zhRatio > 0.2 || zhCount > 2) return 'zh'
+  if (enCount > 0) return 'en'
 
   return 'other'
 }
 
 // 根据源语言自动选择目标语言
-function getAutoTargetLang(sourceLang: string): string {
-  // 中文 -> 英文，其他 -> 中文
-  return sourceLang === 'zh' ? 'en' : 'zh'
+export function getAutoTargetLang(sourceLang: string): string {
+  // 中文 -> 英文
+  if (sourceLang === 'zh') return 'en'
+  // 英文/日文/韩文/其他 -> 中文
+  return 'zh'
 }
 
 // 检测歌词是否已经是双语
@@ -123,10 +126,12 @@ function isBilingualLyrics(lines: LyricLine[]): boolean {
   // 检测是否有交替出现的不同语言（双语歌词的典型特征）
   let alternateCount = 0
   let lastLang = ''
+  const uniqueLangs = new Set<string>()
 
   for (let i = 0; i < languages.length; i++) {
     const lang = languages[i]
     if (lang === 'other') continue
+    uniqueLangs.add(lang)
 
     if (lastLang && lang !== lastLang) {
       alternateCount++
@@ -134,22 +139,12 @@ function isBilingualLyrics(lines: LyricLine[]): boolean {
     lastLang = lang
   }
 
-  // 如果语言交替出现的次数超过总行数的 30%，认为是双语歌词
+  // 如果只有一种语言（哪怕交替也只是空行或其他），则不算双语
+  if (uniqueLangs.size < 2) return false
+
+  // 如果语言交替出现的次数超过总行数的 40%，认为是双语歌词
   const alternateRatio = alternateCount / languages.length
-  if (alternateRatio > 0.3) return true
-
-  // 另一种检测：检查相邻行是否是不同语言（中英对照）
-  let adjacentDiffCount = 0
-  for (let i = 0; i < languages.length - 1; i++) {
-    const curr = languages[i]
-    const next = languages[i + 1]
-    if (curr !== 'other' && next !== 'other' && curr !== next) {
-      adjacentDiffCount++
-    }
-  }
-
-  // 如果相邻不同语言的比例超过 25%，认为是双语
-  return adjacentDiffCount / languages.length > 0.25
+  return alternateRatio > 0.4
 }
 
 function parseLyricLines(lrc: string): LyricLine[] {
@@ -177,17 +172,15 @@ function mergeLyricsWithTimestamps(originalLines: LyricLine[], translatedTexts: 
   for (let i = 0; i < originalLines.length; i++) {
     const time = originalLines[i].time
     const originalText = originalLines[i].text
-    const translatedText = translatedTexts[i] || ''
-
-    // 如果原文是空行或纯音乐标记，保持原样
+    // 修正：只要翻译数组里有这一项（哪怕是空字符串），就使用翻译结果
+    // 只有当这一项完全不存在（undefined）时，才回退到原文
     if (!originalText || /^[♪♫\s]*$/.test(originalText)) {
       result.push(`${time}${originalText}`)
-    } else if (translatedText) {
-      // 有翻译结果，使用翻译
-      result.push(`${time}${translatedText}`)
     } else {
-      // 翻译缺失，使用原文（这种情况不应该发生）
-      result.push(`${time}${originalText}`)
+      // 这里的逻辑变更为：如果翻译结果是空或者是被过滤掉的重复，宁可显示空行也不要显示重复的中文
+      const translatedLine = translatedTexts[i]
+      const textToShow = translatedLine !== undefined ? translatedLine : originalText
+      result.push(`${time}${textToShow}`)
     }
   }
 
@@ -208,6 +201,17 @@ export async function getCachedTranslation(
     const cached = localStorage.getItem(key)
     if (cached) {
       const data: TranslatedLyrics = JSON.parse(cached)
+
+      // 增加缓存质量检查：如果预期目标是英文，但结果检测为中文，则丢弃缓存
+      if (targetLang === 'en') {
+        const sample = data.translated.slice(0, 100)
+        if (detectLanguage(sample) === 'zh') {
+          console.warn('[缓存守卫] 丢弃错误的中文缓存 (预期英文)')
+          localStorage.removeItem(key)
+          return null
+        }
+      }
+
       return data.translated
     }
   } catch {
@@ -237,11 +241,13 @@ export function cacheTranslation(
 }
 
 
-// ========== DeepLX 翻译 ==========
+// ========== DeepLX 代理翻译 ==========
+// ========== DeepLX 代理翻译 ==========
 async function translateWithDeepLX(
   texts: string[],
   targetLang: string,
-  apiKey: string
+  apiKey: string,
+  baseUrl: string = 'https://api.deeplx.org'
 ): Promise<string[]> {
   const results: string[] = []
 
@@ -254,6 +260,42 @@ async function translateWithDeepLX(
   }
   const targetCode = langMap[targetLang] || 'ZH'
 
+  // 处理 API URL
+  let apiUrl = baseUrl
+
+  // 支持多种占位符格式
+  const placeholders = ['{{apiKey}}', '{apiKey}', '<api-key>', '$apiKey']
+  let substituted = false
+  for (const p of placeholders) {
+    if (apiUrl.includes(p)) {
+      apiUrl = apiUrl.replace(p, apiKey)
+      substituted = true
+    }
+  }
+
+  // 如果没有手动指定占位符，且是 api.deeplx.org，则尝试自动插入路径 token
+  if (!substituted && apiUrl.includes('api.deeplx.org') && apiKey) {
+    // 只有当 URL 中没有 apiKey 时才进行替换，避免重复
+    if (!apiUrl.includes(apiKey)) {
+      // 如果只有域名或以后缀 / 结尾，则插入 token
+      // 匹配 https://api.deeplx.org 或 https://api.deeplx.org/
+      const domainMatch = apiUrl.match(/^(https?:\/\/api\.deeplx\.org)(\/)?$/i)
+      if (domainMatch) {
+        apiUrl = `${domainMatch[1]}/${apiKey}`
+      } else {
+        // 如果包含路径但路径中不含 apiKey，且是 api.deeplx.org，则在域名后插入
+        // 例如 https://api.deeplx.org/translate -> https://api.deeplx.org/TOKEN/translate
+        apiUrl = apiUrl.replace(/api\.deeplx\.org/i, `api.deeplx.org/${apiKey}`)
+      }
+    }
+  }
+
+  // 确保有 /translate 后缀，如果没有则添加
+  // 但如果用户已经写了包含占位符的完整路径（如自定义 API），则不强加 /translate
+  if (!apiUrl.includes('/translate') && !substituted) {
+    apiUrl = apiUrl.endsWith('/') ? `${apiUrl}translate` : `${apiUrl}/translate`
+  }
+
   // 批量翻译，每次最多 50 行
   const batchSize = 50
   for (let i = 0; i < texts.length; i += batchSize) {
@@ -265,27 +307,90 @@ async function translateWithDeepLX(
       continue
     }
 
-    const response = await fetch(`https://api.deeplx.org/${apiKey}/translate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: textToTranslate,
-        source_lang: 'auto',
-        target_lang: targetCode
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`DeepLX 翻译失败: ${response.status}`)
+    const payload = {
+      text: textToTranslate,
+      source_lang: 'auto',
+      target_lang: targetCode
     }
 
-    const data = await response.json()
-    if (data.code !== 200 || !data.data) {
-      throw new Error(data.message || 'DeepLX 翻译失败')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) {
+      // 兼容多种 Key 认证方式：部分服务器在 URL 路径中接收，部分在 Header 中接收
+      // 同时发送通常是安全的
+      headers['Authorization'] = `Bearer ${apiKey}`
     }
 
-    const translatedLines = data.data.split('\n')
-    results.push(...translatedLines)
+    let data: any
+
+    try {
+      const { CapacitorHttp } = await import('@capacitor/core').catch(() => ({ CapacitorHttp: null }))
+
+      if (CapacitorHttp && (window as any).Capacitor?.isNativePlatform()) {
+        const res = await CapacitorHttp.post({
+          url: apiUrl,
+          headers,
+          data: payload
+        })
+
+        if (res.status >= 200 && res.status < 300) {
+          data = res.data
+        } else {
+          const errMsg = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+          throw new Error(`HTTP ${res.status}: ${errMsg.slice(0, 100)}`)
+        }
+      } else {
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload)
+        })
+
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => '')
+          throw new Error(`HTTP ${res.status}: ${errorText.slice(0, 100)}`)
+        }
+        data = await res.json()
+      }
+    } catch (e: any) {
+      console.error('DeepLX 请求失败:', e)
+      if (e.message.includes('Failed to fetch') || e.message.includes('Network Error')) {
+        throw new Error('网络请求失败。请检查 API 地址是否可达，或者是否存在跨域限制。')
+      }
+      throw new Error(`DeepLX 请求异常: ${e.message}`)
+    }
+
+    if (data.code !== 200 && data.code !== undefined && data.message) {
+      throw new Error(`DeepLX 错误 ${data.code}: ${data.message}`)
+    }
+
+    // 兼容多种返回格式
+    let translatedResult: string | null = null
+    if (data.data && typeof data.data === 'string') {
+      translatedResult = data.data
+    } else if (data.text && typeof data.text === 'string') {
+      translatedResult = data.text
+    } else if (Array.isArray(data.translations)) {
+      // 兼容 DeepL 官方或兼容 API 格式
+      translatedResult = data.translations.map((t: any) => t.text).join('\n')
+    } else if (typeof data === 'string') {
+      translatedResult = data
+    } else if (data.data && Array.isArray(data.data)) {
+      // 部分代理返回的是数组
+      translatedResult = data.data.join('\n')
+    }
+
+    if (translatedResult) {
+      const translatedLines = String(translatedResult).split('\n')
+      results.push(...translatedLines)
+    } else {
+      console.warn('DeepLX 返回了未知格式的数据:', data)
+      results.push(...batch)
+    }
+
+    // 添加延迟避免请求过快
+    if (i + batchSize < texts.length) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
   }
 
   return results
@@ -333,35 +438,72 @@ async function translateWithGoogle(texts: string[], targetLang: string): Promise
     const translatedLines = translatedText.split('\n')
     results.push(...translatedLines)
   }
-
   return results
 }
 
 // ========== 内置 AI 翻译 ==========
-function generateTranslationPrompt(targetLang: string, lineCount: number): string {
-  const langMap: Record<string, string> = {
-    zh: '简体中文',
-    en: 'English',
-    ja: '日本語',
-    ko: '한국어'
-  }
-  const targetLangName = langMap[targetLang] || '简体中文'
+const LANG_NAMES: Record<string, string> = {
+  zh: 'Chinese',
+  en: 'English',
+  ja: 'Japanese',
+  ko: 'Korean'
+}
 
-  return `你是一个专业的歌词翻译专家。请将以下歌词逐行翻译成${targetLangName}。
+function generateTranslationPrompt(sourceLang: string, targetLang: string): string {
+  const source = LANG_NAMES[sourceLang] || sourceLang
+  const target = LANG_NAMES[targetLang] || targetLang
 
-【重要】输入共 ${lineCount} 行，你必须输出恰好 ${lineCount} 行翻译结果！
+  return `You are a professional song lyrics translator.
 
-要求：
-1. 严格按照输入格式翻译，每行前面有行号如 "1:" "2:" 等
-2. 输出时也必须保留行号，格式为 "行号:翻译内容"
-3. 空行输出 "行号:"（冒号后为空）
-4. 纯音乐标记输出 "行号:♪"
-5. 翻译要自然流畅
-6. 只输出翻译结果，不要解释`
+## Your Task
+Translate ${source} lyrics into natural, fluent ${target}.
+
+## Output Rules
+1. Output ONLY the translated text, one line per input line
+2. Use format: "N:translated text" where N is the line number
+3. Every output line MUST be in ${target} language
+4. Do NOT repeat or echo the original ${source} text
+5. Do NOT add explanations, notes, or commentary
+6. Preserve the emotional tone and meaning of the lyrics
+7. If a line is just music symbols (♪), output "N:♪"
+
+## Example
+Input: 1:我爱你
+Output: 1:I love you`
+}
+
+// 翻译结果清洗与防御
+function cleanTranslationLines(
+  lines: string[],
+  originalTexts: string[],
+  targetLang: string,
+  sourceLang: string
+): string[] {
+  return lines.map((line, idx) => {
+    if (!line) return ''
+
+    // 终极镜像检测：如果翻译结果与原文完全一模一样，且源语言不是目标语言
+    //（排除确实不需要翻译的情况，但如果是翻译任务，通常这就是复读）
+    if (originalTexts[idx] && line.trim() === originalTexts[idx].trim()) {
+      // 只有当源和目标不同时，复读才是异常的
+      if (sourceLang !== targetLang) return ''
+    }
+
+    if (targetLang === 'en') {
+      // 如果目标是英文，移除所有中日韩字符
+      const cleaned = line.replace(/[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/g, '').trim()
+      // 如果清洗后空了，或者剩下的是纯干扰项
+      if (!cleaned || (!/[a-zA-Z0-9]/.test(cleaned) && sourceLang === 'zh')) return ''
+      return cleaned
+    }
+
+    return line
+  })
 }
 
 async function translateWithBuiltinAI(
   texts: string[],
+  sourceLang: string,
   targetLang: string,
   onProgress?: (lines: string[]) => void
 ): Promise<string[]> {
@@ -371,7 +513,6 @@ async function translateWithBuiltinAI(
     throw new Error('请先在设置中配置 AI')
   }
 
-  // 给每行加上行号，确保对齐
   const numberedTexts = texts.map((t, i) => `${i + 1}:${t}`).join('\n')
   const lineCount = texts.length
 
@@ -379,6 +520,16 @@ async function translateWithBuiltinAI(
     config.authType === 'api-key'
       ? { 'api-key': config.apiKey }
       : { Authorization: `Bearer ${config.apiKey}` }
+
+  const sourceLangName = LANG_NAMES[sourceLang] || sourceLang
+  const targetLangName = LANG_NAMES[targetLang] || targetLang
+
+  const userMessage = `Translate the following ${lineCount} lines from ${sourceLangName} to ${targetLangName}.
+
+INPUT:
+${numberedTexts}
+
+OUTPUT:`
 
   const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
@@ -389,12 +540,13 @@ async function translateWithBuiltinAI(
     body: JSON.stringify({
       model: config.model,
       messages: [
-        { role: 'system', content: generateTranslationPrompt(targetLang, lineCount) },
-        { role: 'user', content: numberedTexts }
+        { role: 'system', content: generateTranslationPrompt(sourceLang, targetLang) },
+        { role: 'user', content: userMessage }
       ],
       temperature: 0.3,
       max_tokens: 4000,
-      stream: true
+      stream: true,
+      stop: ['INPUT:', 'INSTRUCTION:', '---']
     })
   })
 
@@ -406,6 +558,9 @@ async function translateWithBuiltinAI(
   const reader = response.body?.getReader()
   const decoder = new TextDecoder()
   let fullContent = ''
+
+  // 因为我们在 prompt 的 Response 最后补了 "1:"，为了解析一致性，我们要把它加回来（或者让 AI 补全）
+  // 实际上 AI 会从 "1:" 后面开始补全内容，或者重新输出 "1:..."
 
   if (reader) {
     while (true) {
@@ -424,38 +579,62 @@ async function translateWithBuiltinAI(
           const delta = json.choices?.[0]?.delta?.content
           if (delta) {
             fullContent += delta
-            // 实时解析带行号的结果
-            const parsed = parseNumberedLines(fullContent, texts.length)
-            onProgress?.(parsed)
+            const parsed = parseNumberedLines(fullContent, lineCount)
+            // 实时应用质量过滤，防止进度条中展示镜像中文
+            const cleanedProgress = cleanTranslationLines(parsed, texts, targetLang, sourceLang)
+            onProgress?.(cleanedProgress)
           }
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
       }
     }
   }
 
-  if (!fullContent) {
-    throw new Error('翻译结果为空')
+  if (!fullContent && lineCount > 0) {
+    throw new Error('AI 返回内容为空')
   }
 
-  // 解析带行号的翻译结果
-  return parseNumberedLines(fullContent, texts.length)
+  // 最终解析并返回
+  return parseNumberedLines(fullContent, lineCount)
 }
 
 // 解析带行号的翻译结果
 function parseNumberedLines(content: string, expectedCount: number): string[] {
   const result: string[] = new Array(expectedCount).fill('')
-  const lines = content.split('\n')
+  // 移除思考过程
+  const cleanContent = content.replace(/<think>[\s\S]*?<\/think>/gi, '')
+  const lines = cleanContent.split('\n')
 
   for (const line of lines) {
-    // 匹配 "数字:" 或 "数字." 或 "数字、" 开头的行
-    const match = line.match(/^(\d+)[:.、：]\s*(.*)$/)
+    // 匹配多种格式：
+    // "1:text", "1：text", "1.text", "1、text", "1) text", "1. text"
+    const match = line.match(/^\s*(\d+)\s*[:.\u3001\uff1a)\]\-]\s*(.*)$/)
     if (match) {
       const lineNum = parseInt(match[1], 10) - 1 // 转为 0-based index
       const text = match[2].trim()
       if (lineNum >= 0 && lineNum < expectedCount) {
-        result[lineNum] = text
+        // 如果这一行已经有内容且新内容为空，不覆盖
+        if (!result[lineNum] || text) {
+          result[lineNum] = text
+        }
+      }
+    }
+  }
+
+  // 检查是否有未翻译的行，尝试用备用方法解析
+  const emptyCount = result.filter(r => r === '').length
+  if (emptyCount > expectedCount * 0.3) {
+    // 如果超过30%的行为空，尝试按顺序解析
+    // 过滤掉包含括号、中括号的非歌词行
+    const contentLines = cleanContent
+      .split('\n')
+      .filter(l => l.trim() && !l.match(/^\s*[\[\(]/))
+
+    for (let i = 0; i < Math.min(contentLines.length, expectedCount); i++) {
+      const line = contentLines[i]
+      // 移除可能的行号前缀
+      const cleaned = line.replace(/^\s*\d+\s*[:.\u3001\uff1a)\]\-]\s*/, '').trim()
+      if (cleaned && !result[i]) {
+        result[i] = cleaned
       }
     }
   }
@@ -484,20 +663,28 @@ export async function translateLyrics(
   }
 
   // 检测是否已经是双语歌词
+  // 增加逻辑：如果用户手动重试翻译，通过 textsToTranslate 的长度判断是否来自单语原文
   if (isBilingualLyrics(originalLines)) {
-    callbacks?.onError?.('歌词已经是双语，无需翻译')
-    throw new Error('歌词已经是双语，无需翻译')
+    // 双语歌词，检查是否需要重新互译
   }
 
+  // 检测源语言
   const textsToTranslate = originalLines.map((l) => l.text)
+  // 获取前30行有意义的文本进行检测 (增加样本容量防止 intro 干扰)
+  const sampleText = textsToTranslate
+    .filter(t => t.trim() && !/^[♪♫\s]*$/.test(t))
+    .slice(0, 30).join('\n')
+  const sourceLang = detectLanguage(sampleText || textsToTranslate[0])
 
   // 确定目标语言
   let targetLang = translateConfig.targetLang
   if (targetLang === 'auto') {
-    // 自动检测：取前几行歌词检测语言
-    const sampleText = textsToTranslate.slice(0, 10).join(' ')
-    const sourceLang = detectLanguage(sampleText)
     targetLang = getAutoTargetLang(sourceLang) as TargetLanguage
+  }
+
+  // 强制互译：如果源是中文，必须翻译成英文
+  if (sourceLang === 'zh') {
+    targetLang = 'en'
   }
 
   try {
@@ -505,10 +692,15 @@ export async function translateLyrics(
 
     switch (translateConfig.provider) {
       case 'deeplx':
-        if (!translateConfig.deeplxKey) {
-          throw new Error('请先配置 DeepLX API Key')
+        if (!translateConfig.deeplxKey && !translateConfig.deeplxBaseUrl) {
+          throw new Error('请先配置 DeepLX API Key 或 API 地址')
         }
-        translatedTexts = await translateWithDeepLX(textsToTranslate, targetLang, translateConfig.deeplxKey)
+        translatedTexts = await translateWithDeepLX(
+          textsToTranslate,
+          targetLang,
+          translateConfig.deeplxKey || '',
+          translateConfig.deeplxBaseUrl
+        )
         break
 
       case 'google':
@@ -517,14 +709,57 @@ export async function translateLyrics(
 
       case 'builtin-ai':
       default:
-        translatedTexts = await translateWithBuiltinAI(textsToTranslate, targetLang, (lines) => {
-          const mergedLyrics = mergeLyricsWithTimestamps(originalLines, lines)
-          callbacks?.onProgress?.(mergedLyrics)
-        })
+        try {
+          translatedTexts = await translateWithBuiltinAI(textsToTranslate, sourceLang, targetLang, (lines) => {
+            const mergedLyrics = mergeLyricsWithTimestamps(originalLines, lines)
+            callbacks?.onProgress?.(mergedLyrics)
+          })
+        } catch (error: any) {
+          // 如果 AI 翻译失败或被拦截（回显），尝试静默降级到 Google 翻译
+          console.warn('AI 翻译异常，尝试降级到 Google 翻译:', error.message)
+          translatedTexts = await translateWithGoogle(textsToTranslate, targetLang)
+        }
         break
     }
 
+    // 终极防御：如果目标是英文，则强力清洗掉所有中日韩字符
+    translatedTexts = cleanTranslationLines(translatedTexts, textsToTranslate, targetLang, sourceLang)
+
+    // 补救机制：检测哪些行翻译缺失，用 Google 翻译补充
+    const missingIndices: number[] = []
+    for (let i = 0; i < translatedTexts.length; i++) {
+      const original = textsToTranslate[i]
+      const translated = translatedTexts[i]
+      // 如果原文有内容但翻译为空，记录下来
+      if (original && original.trim() && !/^[♪♫\s]*$/.test(original) && !translated) {
+        missingIndices.push(i)
+      }
+    }
+
+    if (missingIndices.length > 0) {
+      const missingTexts = missingIndices.map(i => textsToTranslate[i])
+      try {
+        const filledTexts = await translateWithGoogle(missingTexts, targetLang)
+        for (let j = 0; j < missingIndices.length; j++) {
+          translatedTexts[missingIndices[j]] = filledTexts[j] || ''
+        }
+      } catch (e) {
+        console.warn('[翻译补救] Google 翻译补充失败:', e)
+      }
+    }
+
     const finalLyrics = mergeLyricsWithTimestamps(originalLines, translatedTexts)
+
+    // 最后的最后，做一个极其严格的检查：如果源是中文且结果里依然全是中文，这绝对是失败的
+    if (sourceLang === 'zh' && targetLang === 'en') {
+      const sample = translatedTexts.filter(t => t.trim() && t !== '♪').slice(0, 10).join(' ')
+      const resultLang = detectLanguage(sample)
+      if (sample && resultLang === 'zh') {
+        console.error('[最终校验失败] 翻译结果检测仍为中文', { resultLang, sample: sample.slice(0, 50) })
+        throw new Error('翻译结果异常：检测到结果仍为中文原文。请尝试切换 AI 模型或稍后再试。')
+      }
+    }
+
     callbacks?.onComplete?.(finalLyrics)
     return { translated: finalLyrics, targetLang }
   } catch (error: any) {
@@ -541,16 +776,22 @@ export async function translateAndCacheLyrics(
 ): Promise<string | null> {
   const translateConfig = loadTranslateConfig()
 
+  const originalLines = parseLyricLines(lyrics)
+  const textsToTranslate = originalLines.map((l) => l.text)
+  const sampleText = textsToTranslate
+    .filter(t => t.trim() && !t.includes('♪'))
+    .slice(0, 10).join('\n')
+  const sourceLang = detectLanguage(sampleText || textsToTranslate[0])
+
   // 确定目标语言用于缓存 key
   let targetLang = translateConfig.targetLang
   if (targetLang === 'auto') {
-    const originalLines = parseLyricLines(lyrics)
-    const sampleText = originalLines
-      .slice(0, 10)
-      .map((l) => l.text)
-      .join(' ')
-    const sourceLang = detectLanguage(sampleText)
     targetLang = getAutoTargetLang(sourceLang) as TargetLanguage
+  }
+
+  // 强制纠偏逻辑：与 translateLyrics 保持完全一致
+  if (sourceLang === 'zh') {
+    targetLang = 'en'
   }
 
   // 先检查缓存

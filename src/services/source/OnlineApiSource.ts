@@ -48,7 +48,7 @@ export function getEnabledSources(): MusicSource[] {
   try {
     const data = localStorage.getItem(MUSIC_SOURCES_KEY)
     if (data) return JSON.parse(data)
-  } catch {}
+  } catch { }
   return defaultEnabledSources
 }
 
@@ -147,10 +147,8 @@ export async function searchSongs(
 ): Promise<SearchResult[]> {
   try {
     const url = `${API_BASE}/?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&limit=${limit}`
-    console.log(`[${source}] 搜索请求:`, url)
     const res = await nativeFetch(url)
     const json: ApiResponse<SearchData> = await res.json()
-    console.log(`[${source}] API响应:`, json)
     if (json.code === 200 && json.data?.results) {
       // 确保每个结果都有正确的 platform 字段
       return json.data.results.map(r => ({
@@ -168,8 +166,7 @@ export async function searchSongs(
 // 6. 聚合搜索 (多平台) - 改用并行单平台搜索，确保QQ源优先
 export async function aggregateSearch(keyword: string): Promise<SearchResult[]> {
   const enabledSources = getEnabledSources()
-  console.log('[聚合搜索] 启用的音乐源:', enabledSources)
-  
+
   // 按优先级排序：QQ > 网易云 > 其他
   const sourcePriority: Record<MusicSource, number> = {
     qq: 0,
@@ -178,33 +175,28 @@ export async function aggregateSearch(keyword: string): Promise<SearchResult[]> 
     kuwo: 3,
     migu: 4
   }
-  
+
   const sortedSources = [...enabledSources].sort(
     (a, b) => (sourcePriority[a] ?? 99) - (sourcePriority[b] ?? 99)
   )
-  console.log('[聚合搜索] 排序后的音乐源:', sortedSources)
-  
+
   // 并行搜索所有启用的平台
-  const searchPromises = sortedSources.map(source => 
+  const searchPromises = sortedSources.map(source =>
     searchSongs(source, keyword, 10).catch(e => {
       console.error(`[${source}] 搜索出错:`, e)
       return [] as SearchResult[]
     })
   )
-  
+
   const results = await Promise.all(searchPromises)
-  
+
   // 按平台优先级顺序合并结果
   const merged: SearchResult[] = []
   for (let i = 0; i < sortedSources.length; i++) {
-    const source = sortedSources[i]
     const platformResults = results[i]
-    console.log(`[${source}] 返回 ${platformResults.length} 条结果`, platformResults.slice(0, 2))
     merged.push(...platformResults)
   }
-  
-  console.log('[聚合搜索] 最终结果数量:', merged.length, '前3条:', merged.slice(0, 3).map(r => `${r.name}(${r.platform})`))
-  
+
   return merged
 }
 

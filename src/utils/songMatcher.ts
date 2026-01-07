@@ -90,7 +90,6 @@ export function findBestMatch(
   for (const r of results) {
     if (isExcluded(r.name, r.artist)) continue
     if (isTitleMatch(r.name, true) && isArtistMatch(r.artist)) {
-      console.log(`[精确匹配] ${r.name} - ${r.artist}`)
       return r
     }
   }
@@ -99,7 +98,6 @@ export function findBestMatch(
   for (const r of results) {
     if (isExcluded(r.name, r.artist)) continue
     if (isTitleMatch(r.name, false) && isArtistMatch(r.artist)) {
-      console.log(`[包含匹配] ${r.name} - ${r.artist}`)
       return r
     }
   }
@@ -109,13 +107,11 @@ export function findBestMatch(
     if (isExcluded(r.name, r.artist)) continue
     const normRName = normalizeStr(r.name)
     if (normRName === normTitle) {
-      console.log(`[仅歌名匹配] ${r.name} - ${r.artist}`)
       return r
     }
   }
 
   // 不再有更低优先级！必须同时匹配歌名和歌手
-  console.log(`[未找到匹配] ${targetTitle} - ${targetArtist}`)
   return null
 }
 

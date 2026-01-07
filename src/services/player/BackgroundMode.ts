@@ -5,7 +5,7 @@ import type { PluginListenerHandle } from '@capacitor/core'
  * 后台播放插件接口
  */
 interface BackgroundModePlugin {
-  enable(options: { 
+  enable(options: {
     title: string
     artist: string
     cover?: string
@@ -13,7 +13,7 @@ interface BackgroundModePlugin {
     duration?: number
   }): Promise<{ success: boolean }>
   disable(): Promise<{ success: boolean }>
-  updateNotification(options: { 
+  updateNotification(options: {
     title: string
     artist: string
     cover?: string
@@ -70,7 +70,6 @@ class BackgroundModeService {
       this.listenerHandle = await NativeBackgroundMode.addListener(
         'controlAction',
         (data: { action: string }) => {
-          console.log('收到通知栏控制:', data.action)
           if (this.controlCallback) {
             this.controlCallback(data.action as 'playPause' | 'next' | 'prev' | 'toggleLyrics')
           }
@@ -104,7 +103,6 @@ class BackgroundModeService {
           isPlaying: options.isPlaying ?? true,
           duration: options.duration ?? 0
         })
-        console.log('后台播放服务已启动')
       } catch (e) {
         console.error('启动后台播放服务失败:', e)
       }
@@ -119,7 +117,6 @@ class BackgroundModeService {
     if (this.isNative()) {
       try {
         await NativeBackgroundMode.disable()
-        console.log('后台播放服务已停止')
       } catch (e) {
         console.error('停止后台播放服务失败:', e)
       }

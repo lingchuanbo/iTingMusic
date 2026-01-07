@@ -25,7 +25,7 @@ class AudioPlayer {
   constructor() {
     // Android 平台强制使用原生 Audio，因为 Howler 在后台会被暂停
     this.useNativeAudio = Capacitor.isNativePlatform()
-    
+
     // 监听页面可见性变化，确保后台播放
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleVisibilityChange.bind(this))
@@ -44,8 +44,7 @@ class AudioPlayer {
 
     backgroundMode.setControlCallback((action) => {
       const store = usePlayerStore()
-      console.log('AudioPlayer 处理通知栏控制:', action)
-      
+
       switch (action) {
         case 'playPause':
           // 只调用 toggle，它会处理实际的播放/暂停
@@ -99,15 +98,14 @@ class AudioPlayer {
    */
   private handlePlayError(store: ReturnType<typeof usePlayerStore>) {
     this.errorCount++
-    console.log(`播放错误次数: ${this.errorCount}/${this.maxErrors}`)
-    
+
     if (this.errorCount >= this.maxErrors) {
       console.error('连续播放失败次数过多，停止播放')
       this.errorCount = 0
       store.isPlaying = false
       return
     }
-    
+
     // 延迟切换下一首
     setTimeout(() => {
       store.nextTrack()
@@ -134,21 +132,17 @@ class AudioPlayer {
           playUrl = cachedUrl
           store.setCached(true)
           store.setBuffered(100)
-          console.log('使用缓存播放:', track.title)
         } else if (offlineStore.isOfflineMode) {
           // 离线模式下，没有缓存则跳过
-          console.log('离线模式：歌曲未缓存，跳过', track.title)
           this.handlePlayError(store)
           return
         } else if (onlineTrack._platform && onlineTrack._songId) {
           store.setCached(false)
           store.setBuffered(0)
           // 解析实际音频 URL
-          console.log('解析实际音频URL...')
           const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
           if (actualUrl) {
             playUrl = actualUrl
-            console.log('实际音频URL:', actualUrl)
             // 后台缓存
             this.cacheInBackground(track.id, playUrl, track)
           } else {
@@ -182,8 +176,6 @@ class AudioPlayer {
       })
     }
 
-    console.log('开始播放:', playUrl, '使用原生Audio:', this.useNativeAudio)
-
     if (this.useNativeAudio) {
       this.playWithNativeAudio(playUrl, track, store)
     } else {
@@ -205,19 +197,17 @@ class AudioPlayer {
     let hasStartedPlaying = false
 
     this.audio.oncanplaythrough = () => {
-      console.log('原生Audio: 可以播放')
       this.audio?.play().catch(e => {
         console.error('原生Audio: play() 失败', e)
       })
     }
 
     this.audio.onplay = () => {
-      console.log('原生Audio: 播放开始')
       hasStartedPlaying = true
       this.errorCount = 0 // 播放成功，重置错误计数
       store.isPlaying = true
       this.startNativeProgress()
-      
+
       if (store.backgroundPlayEnabled) {
         backgroundMode.enable({
           title: currentTrack?.title,
@@ -231,7 +221,6 @@ class AudioPlayer {
     }
 
     this.audio.onpause = () => {
-      console.log('原生Audio: 暂停')
       // 只有在非后台状态下才更新 isPlaying
       if (!document.hidden) {
         store.isPlaying = false
@@ -241,7 +230,6 @@ class AudioPlayer {
     }
 
     this.audio.onended = () => {
-      console.log('原生Audio: 播放结束, 播放模式:', store.playMode)
       if (store.playMode === 'single') {
         // 单曲循环
         if (this.audio) {
@@ -255,10 +243,9 @@ class AudioPlayer {
     }
 
     this.audio.onloadedmetadata = () => {
-      console.log('原生Audio: 元数据加载完成, 时长:', this.audio?.duration)
       const audioDuration = this.audio?.duration || 0
       store.setDuration(audioDuration)
-      
+
       // 更新通知栏时长
       if (store.backgroundPlayEnabled && currentTrack && audioDuration > 0) {
         backgroundMode.updateNotification({
@@ -316,7 +303,6 @@ class AudioPlayer {
       volume: store.volume,
       format: ['mp3', 'flac', 'wav', 'ogg', 'm4a'],
       onplay: () => {
-        console.log('Howler: 播放开始')
         store.isPlaying = true
         this.startHowlerProgress()
         if (store.backgroundPlayEnabled) {
@@ -333,7 +319,6 @@ class AudioPlayer {
         store.isPlaying = false
       },
       onend: () => {
-        console.log('Howler: 播放结束, 播放模式:', store.playMode)
         if (store.playMode === 'single') {
           this.howl?.play()
         } else {
@@ -344,7 +329,6 @@ class AudioPlayer {
         }
       },
       onload: () => {
-        console.log('Howler: 音频加载完成, 时长:', this.howl?.duration())
         store.setDuration(this.howl?.duration() || 0)
       },
       onloaderror: (_id, error) => {
@@ -370,7 +354,6 @@ class AudioPlayer {
         title: track.title,
         artist: track.artist
       })
-      console.log('已缓存音频:', track.title)
       // 缓存完成，更新状态
       if (store.currentTrack?.id === id) {
         store.setCached(true)
@@ -378,7 +361,6 @@ class AudioPlayer {
 
       if (track.cover) {
         await audioCache.cacheCover(id, track.cover)
-        console.log('已缓存封面:', track.title)
       }
     } catch (e) {
       console.warn('后台缓存失败:', e)
@@ -441,11 +423,11 @@ class AudioPlayer {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
     }
-    
+
     const store = usePlayerStore()
     let lastUpdate = 0
     const UPDATE_INTERVAL = 250 // 降低更新频率到 250ms，省电
-    
+
     const update = (timestamp: number) => {
       if (this.audio && !this.audio.paused) {
         // 节流：只在间隔时间后更新
@@ -472,11 +454,11 @@ class AudioPlayer {
       cancelAnimationFrame(this.rafId)
       this.rafId = null
     }
-    
+
     const store = usePlayerStore()
     let lastUpdate = 0
     const UPDATE_INTERVAL = 250 // 降低更新频率到 250ms，省电
-    
+
     const update = (timestamp: number) => {
       // 使用 store.isPlaying 判断，因为 howl.playing() 在某些情况下不可靠
       if (this.howl && store.isPlaying) {
@@ -503,13 +485,13 @@ class AudioPlayer {
 
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId)
-    
+
     if (this.audio) {
       this.audio.pause()
       this.audio.src = ''
       this.audio = null
     }
-    
+
     this.howl?.unload()
     this.howl = null
   }
@@ -528,10 +510,10 @@ class AudioPlayer {
   setBackgroundPlay(enabled: boolean, track?: Track) {
     const store = usePlayerStore()
     store.backgroundPlayEnabled = enabled
-    const isPlaying = this.useNativeAudio 
+    const isPlaying = this.useNativeAudio
       ? (this.audio && !this.audio.paused)
       : this.howl?.playing()
-    
+
     if (enabled && isPlaying) {
       backgroundMode.enable({
         title: track?.title || store.currentTrack?.title,

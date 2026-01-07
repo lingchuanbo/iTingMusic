@@ -432,31 +432,36 @@ void _isCurrentLyricLine
     <template v-if="!selectedPlaylist">
       <!-- 标题栏 -->
       <div class="flex items-center justify-between mb-6 flex-shrink-0">
-        <h2 class="text-2xl font-bold text-white">🎵 我的歌单</h2>
+        <h2 class="text-2xl font-bold text-white">
+          我的歌单
+          <span class="text-white/40 text-base font-normal ml-2">{{ playlistStore.playlists.length }} 个</span>
+        </h2>
         <div class="flex items-center gap-2">
-          <!-- 视图切换 -->
-          <div v-if="playlistStore.playlists.length > 0" class="flex rounded-lg bg-white/10 p-0.5">
-            <button
-              @click="viewMode = 'list'"
-              :class="['w-7 h-7 md:w-8 md:h-8 rounded-md flex items-center justify-center transition-colors', viewMode === 'list' ? 'bg-purple-600 text-white' : 'text-white/60']"
-            >
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/></svg>
-            </button>
-            <button
-              @click="viewMode = 'grid'"
-              :class="['w-7 h-7 md:w-8 md:h-8 rounded-md flex items-center justify-center transition-colors', viewMode === 'grid' ? 'bg-purple-600 text-white' : 'text-white/60']"
-            >
-              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>
-            </button>
-          </div>
           <!-- 新建按钮 -->
           <button
             @click="showCreateModal = true"
-            class="w-7 h-7 md:w-auto md:h-auto md:px-3 md:py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm flex items-center justify-center gap-1 transition-colors"
+            class="px-3 py-1.5 rounded text-sm bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center gap-1.5 transition-colors"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            <span class="text-base">+</span>
             <span class="hidden md:inline">新建</span>
           </button>
+          <!-- 视图切换按钮 -->
+          <div v-if="playlistStore.playlists.length > 0" class="flex gap-1 bg-white/5 rounded-lg p-1">
+            <button
+              @click="viewMode = 'list'"
+              :class="['px-3 py-1.5 rounded text-sm transition-colors', viewMode === 'list' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white']"
+              title="列表视图"
+            >
+              ☰
+            </button>
+            <button
+              @click="viewMode = 'grid'"
+              :class="['px-3 py-1.5 rounded text-sm transition-colors', viewMode === 'grid' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white']"
+              title="网格视图"
+            >
+              ▦
+            </button>
+          </div>
         </div>
       </div>
 

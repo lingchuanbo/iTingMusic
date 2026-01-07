@@ -198,22 +198,27 @@ function playSong(track: Track) {
   <div class="flex-1 overflow-y-auto p-6">
     <!-- 标题栏 -->
     <div class="flex items-center justify-between mb-6">
-      <h2 class="text-2xl font-bold text-white">❤️ 我的喜爱</h2>
+      <h2 class="text-2xl font-bold text-white">
+        我的喜爱
+        <span class="text-white/40 text-base font-normal ml-2">{{ favorites.length }} 首</span>
+      </h2>
       <div class="flex items-center gap-2">
-        <span v-if="!isSelectMode && favorites.length > 0" class="text-white/40 text-sm mr-2">长按多选</span>
-        <!-- 视图切换 -->
-        <div v-if="favorites.length > 0" class="flex rounded-lg bg-white/10 p-0.5">
+        <span v-if="!isSelectMode && favorites.length > 0" class="text-white/40 text-sm hidden md:block">长按多选</span>
+        <!-- 视图切换按钮 -->
+        <div v-if="favorites.length > 0" class="flex gap-1 bg-white/5 rounded-lg p-1">
           <button
             @click="setViewMode('list')"
-            :class="['w-7 h-7 md:w-8 md:h-8 rounded-md flex items-center justify-center transition-colors', viewMode === 'list' ? 'bg-purple-600 text-white' : 'text-white/60']"
+            :class="['px-3 py-1.5 rounded text-sm transition-colors', viewMode === 'list' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white']"
+            title="列表视图"
           >
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 4h18v2H3V4zm0 7h18v2H3v-2zm0 7h18v2H3v-2z"/></svg>
+            ☰
           </button>
           <button
             @click="setViewMode('grid')"
-            :class="['w-7 h-7 md:w-8 md:h-8 rounded-md flex items-center justify-center transition-colors', viewMode === 'grid' ? 'bg-purple-600 text-white' : 'text-white/60']"
+            :class="['px-3 py-1.5 rounded text-sm transition-colors', viewMode === 'grid' ? 'bg-white/20 text-white' : 'text-white/50 hover:text-white']"
+            title="网格视图"
           >
-            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>
+            ▦
           </button>
         </div>
       </div>
@@ -278,8 +283,8 @@ function playSong(track: Track) {
         v-for="track in favorites"
         :key="track.id"
         :class="[
-          'flex items-center gap-4 p-3 rounded-xl group cursor-pointer transition-colors',
-          selectedIds.has(track.id) ? 'bg-purple-600/30' : 'hover:bg-white/10'
+          'group flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-200',
+          selectedIds.has(track.id) ? 'bg-purple-600/30' : store.currentTrack?.id === track.id ? 'bg-white/20' : 'hover:bg-white/10'
         ]"
         @click="handleClick(track)"
         @mousedown="handleLongPressStart(track)"
@@ -298,9 +303,16 @@ function playSong(track: Track) {
         </div>
 
         <!-- 封面 -->
-        <div class="w-12 h-12 rounded-lg overflow-hidden bg-white/10 flex-shrink-0">
+        <div class="relative w-12 h-12 rounded-lg overflow-hidden bg-white/10 flex-shrink-0">
           <img v-if="track.cover" :src="track.cover" :alt="track.title" class="w-full h-full object-cover" />
           <div v-else class="w-full h-full flex items-center justify-center text-2xl">🎵</div>
+          <div v-if="store.currentTrack?.id === track.id && store.isPlaying" class="absolute inset-0 bg-black/40 flex items-center justify-center">
+            <div class="flex gap-0.5">
+              <span class="w-1 h-4 bg-white rounded animate-pulse"></span>
+              <span class="w-1 h-4 bg-white rounded animate-pulse" style="animation-delay: 0.2s"></span>
+              <span class="w-1 h-4 bg-white rounded animate-pulse" style="animation-delay: 0.4s"></span>
+            </div>
+          </div>
         </div>
 
         <!-- 信息 -->
@@ -310,7 +322,7 @@ function playSong(track: Track) {
         </div>
 
         <!-- 时长 -->
-        <span class="text-white/40 text-sm">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
+        <span class="text-white/40 text-sm hidden sm:inline">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
 
         <!-- 更多操作按钮（长按进入多选） -->
         <button
