@@ -75,14 +75,15 @@ watch(activeView, (newView) => {
 // 搜索弹窗是否打开
 const isSearchOpen = computed(() => searchBarRef.value?.showMobileSearch ?? false)
 
-// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏）
-const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value)
+// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏）
+import { isPlayerExpanded } from '@/store/ui'
+const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value && !isPlayerExpanded.value)
 
 // 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏）
 const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value)
 
-// 是否显示底部导航（AI全屏时隐藏）
-const showMobileNav = computed(() => !aiPickerFullscreen.value)
+// 是否显示底部导航（AI全屏时隐藏，播放器展开时隐藏）
+const showMobileNav = computed(() => !aiPickerFullscreen.value && !isPlayerExpanded.value)
 
 // 动态背景
 const bgStyle = computed(() => {
@@ -132,7 +133,7 @@ provide('openGlobalSearch', openGlobalSearch)
     </div>
 
     <!-- 主布局 -->
-    <div class="relative z-10 h-full flex flex-col md:flex-row">
+    <div class="relative z-0 h-full flex flex-col md:flex-row">
       <!-- 侧边栏 - 桌面端显示在左侧 -->
       <Sidebar :active-view="activeView" @navigate="handleNavigate" class="hidden md:flex" />
 
@@ -184,7 +185,7 @@ provide('openGlobalSearch', openGlobalSearch)
       <button
         v-if="showGlobalSearch"
         @click="openGlobalSearch"
-        class="fixed right-4 z-40 w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-600/40 flex items-center justify-center active:scale-95 hover:shadow-xl hover:shadow-purple-600/50 transition-all group"
+        class="fixed right-4 z-[70] w-12 h-12 md:w-14 md:h-14 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 text-white shadow-lg shadow-purple-600/40 flex items-center justify-center active:scale-95 hover:shadow-xl hover:shadow-purple-600/50 transition-all group"
         style="bottom: calc(3.5rem + 4rem + env(safe-area-inset-bottom, 0px) + 1rem)"
       >
         <svg class="w-5 h-5 md:w-6 md:h-6 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">

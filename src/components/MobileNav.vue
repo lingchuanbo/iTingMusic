@@ -52,7 +52,7 @@ const navItems = computed(() => [
 
 <template>
   <Transition name="mobile-nav">
-    <nav v-if="!isSelectMode && !isModalOpen" class="fixed bottom-0 left-0 right-0 z-40 bg-black/95 backdrop-blur-xl border-t border-white/10 safe-area-pb">
+    <nav v-if="!isSelectMode && !isModalOpen" class="fixed bottom-0 left-0 right-0 z-[60] bg-black/95 backdrop-blur-xl border-t border-white/10 safe-area-pb">
       <div class="flex justify-around items-center h-14">
         <button
           v-for="item in navItems"

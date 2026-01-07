@@ -6,6 +6,9 @@ export const isSelectMode = ref(false)
 // UI state for modal visibility
 export const isModalOpen = ref(false)
 
+// UI state for player bar expansion
+export const isPlayerExpanded = ref(false)
+
 // Helper functions to toggle states
 export function setSelectMode(value: boolean) {
   isSelectMode.value = value
@@ -13,4 +16,8 @@ export function setSelectMode(value: boolean) {
 
 export function setModalOpen(value: boolean) {
   isModalOpen.value = value
+}
+
+export function setPlayerExpanded(value: boolean) {
+  isPlayerExpanded.value = value
 }

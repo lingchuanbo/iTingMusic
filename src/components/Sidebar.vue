@@ -69,7 +69,7 @@ function handleNav(id: string) {
 
 <template>
   <Transition name="sidebar">
-    <aside v-if="!isSelectMode" class="w-20 h-full flex flex-col items-center py-4 bg-black/20 backdrop-blur-xl border-r border-white/5">
+    <aside v-if="!isSelectMode" class="w-20 h-full flex flex-col items-center py-4 bg-black/20 backdrop-blur-xl border-r border-white/5 relative z-50">
     <nav class="flex flex-col gap-2 w-full px-3 overflow-y-auto">
       <button
         v-for="item in navItems"

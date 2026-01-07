@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
 import type { AudioQuality, MusicSource } from '@/services/source/OnlineApiSource'
@@ -112,6 +112,22 @@ const showApiKey = ref(false)
 const aiTestStatus = ref<'idle' | 'testing' | 'success' | 'error'>('idle')
 const aiTestMessage = ref('')
 const selectedCustomProvider = ref<string>('custom') // 自定义模式下选择的服务商
+
+// 当前 AI 配置显示
+const currentAIDisplay = computed(() => {
+  if (aiConfig.value.provider === 'builtin' && aiConfig.value.builtinId) {
+    const builtin = BUILTIN_AI_LIST.find(ai => ai.id === aiConfig.value.builtinId)
+    return builtin?.name || '内置 AI'
+  }
+  if (aiConfig.value.provider === 'custom') {
+    const provider = customProviders.find(p => p.baseUrl === aiConfig.value.baseUrl)
+    if (provider && provider.id !== 'custom') {
+      return provider.name
+    }
+    return aiConfig.value.model || '自定义'
+  }
+  return '未配置'
+})
 
 // 自定义AI服务商预设
 const customProviders = [
@@ -381,6 +397,7 @@ function toggleSection(section: string) {
               <line x1="8" y1="22" x2="16" y2="22"/>
             </svg>
             <span class="text-white font-medium">AI 配置</span>
+            <span class="text-white/40 text-sm">{{ currentAIDisplay }}</span>
           </div>
           <svg 
             class="w-5 h-5 text-white/40 transition-transform" 
