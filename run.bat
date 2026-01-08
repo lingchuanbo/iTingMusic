@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title Zen Player
+title LTing Player
 
 echo ========================================
-echo        Zen Player 启动脚本
+echo        灵听音乐 启动脚本
 echo ========================================
 echo.
 

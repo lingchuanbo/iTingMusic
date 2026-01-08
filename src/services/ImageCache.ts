@@ -59,18 +59,44 @@ class ImageCache {
             return URL.createObjectURL(cachedBlob)
         }
 
-        // 2. 缓存未命中，下载图片
+        // 2. 检查是否在原生平台上
+        const isNative = typeof (window as any).Capacitor?.isNativePlatform === 'function'
+            && (window as any).Capacitor.isNativePlatform()
+
+        // Web 平台：直接返回原 URL，让浏览器处理（不尝试预缓存以避免 CORS）
+        if (!isNative) {
+            return url
+        }
+
+        // 3. 原生平台：下载并缓存
         try {
-            const response = await fetch(url)
-            const blob = await response.blob()
+            const { CapacitorHttp } = await import('@capacitor/core')
+            const response = await CapacitorHttp.get({
+                url: url,
+                responseType: 'blob'
+            })
 
-            // 3. 存入缓存
-            await this.addToCache(url, blob)
+            if (response.status >= 200 && response.status < 300 && response.data) {
+                // CapacitorHttp 返回的是 base64，需要转换为 Blob
+                const base64 = response.data
+                const byteCharacters = atob(base64)
+                const byteNumbers = new Array(byteCharacters.length)
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i)
+                }
+                const byteArray = new Uint8Array(byteNumbers)
+                const blob = new Blob([byteArray], { type: response.headers?.['content-type'] || 'image/jpeg' })
 
-            return URL.createObjectURL(blob)
+                // 存入缓存
+                await this.addToCache(url, blob)
+
+                return URL.createObjectURL(blob)
+            } else {
+                throw new Error(`HTTP ${response.status}`)
+            }
         } catch (e) {
-            console.warn('Failed to cache image:', url, e)
-            return url // 降级：直接返回原 URL
+            // 原生平台下载失败，返回原 URL
+            return url
         }
     }
 

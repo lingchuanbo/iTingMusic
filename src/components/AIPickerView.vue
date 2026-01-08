@@ -3,6 +3,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { searchResultToTrack } from '@/services/source/OnlineApiSource'
+import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
 import {
   getAIRecommendations,
   isAIConfigured,
@@ -364,6 +365,15 @@ async function addToUserPlaylist(playlistId: string) {
   searching.value = false
   thinkingPhase.value = 'confirming'
 }
+
+// 创建新歌单并添加歌曲
+function handleCreatePlaylist() {
+  const name = prompt('请输入歌单名称')
+  if (!name || !name.trim()) return
+  
+  const newPlaylist = playlistStore.createPlaylist(name.trim())
+  addToUserPlaylist(newPlaylist.id)
+}
 </script>
 
 <template>
@@ -692,34 +702,12 @@ async function addToUserPlaylist(playlistId: string) {
     </Transition>
 
     <!-- 歌单选择弹窗 -->
-    <Transition name="fade">
-      <div v-if="showPlaylistModal" class="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" @click.self="showPlaylistModal = false">
-        <div class="w-full max-w-md bg-slate-900 rounded-t-3xl overflow-hidden">
-          <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <span class="text-white font-medium">添加到歌单</span>
-            <button @click="showPlaylistModal = false" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            </button>
-          </div>
-          
-          <div class="max-h-64 overflow-y-auto">
-            <div v-if="playlistStore.playlists.length === 0" class="py-8 text-center">
-              <p class="text-white/40 text-sm">还没有歌单</p>
-              <p class="text-white/30 text-xs mt-1">去「我的」页面创建一个吧</p>
-            </div>
-            <button v-for="playlist in playlistStore.playlists" :key="playlist.id" @click="addToUserPlaylist(playlist.id)" class="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left border-b border-white/5 last:border-b-0">
-              <div class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <svg class="w-5 h-5 text-purple-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-white text-sm truncate">{{ playlist.name }}</p>
-                <p class="text-white/40 text-xs">{{ playlist.trackIds.length }} 首</p>
-              </div>
-            </button>
-          </div>
-        </div>
-      </div>
-    </Transition>
+    <PlaylistPickerDialog
+      :visible="showPlaylistModal"
+      @close="showPlaylistModal = false"
+      @select="addToUserPlaylist"
+      @create="handleCreatePlaylist"
+    />
 
     <!-- 偏好设置弹窗 -->
     <Transition name="fade">

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
+import { usePlaylistStore } from '@/store/playlist'
 import { isSelectMode, isModalOpen, setPlayerExpanded, showPlaylist, showPlaylistPicker, registerCollapsePlayer } from '@/store/ui'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { trackStorage } from '@/services/TrackStorage'
 import CachedImage from '@/components/common/CachedImage.vue'
+import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
 
 const store = usePlayerStore()
+const playlistStore = usePlaylistStore()
 const playlistDragY = ref(0)
 const isDraggingPlaylist = ref(false)
 let playlistTouchStartY = 0
@@ -45,33 +48,28 @@ function toggleFavorite() {
 
 // Playlist picker (使用全局状态 showPlaylistPicker)
 
-const userPlaylists = computed(() => {
-  const data = localStorage.getItem('zen_playlists')
-  if (!data) return []
-  try {
-    const playlists = JSON.parse(data)
-    return playlists.map((p: any) => ({ id: p.id, name: p.name }))
-  } catch {
-    return []
-  }
-})
-
 function addToPlaylist(playlistId: string) {
   if (!store.currentTrack) return
+  // 先保存歌曲数据到 trackStorage
   trackStorage.saveTrack(store.currentTrack)
-  const data = localStorage.getItem('zen_playlists')
-  if (!data) return
-  try {
-    const playlists = JSON.parse(data)
-    const playlist = playlists.find((p: any) => p.id === playlistId)
-    if (playlist && !playlist.trackIds.includes(store.currentTrack.id)) {
-      playlist.trackIds.push(store.currentTrack.id)
-      playlist.updatedAt = Date.now()
-      localStorage.setItem('zen_playlists', JSON.stringify(playlists))
-    }
-  } catch (e) {
-    console.error('添加到歌单失败', e)
+  // 使用 playlistStore 添加歌曲到歌单
+  playlistStore.addToPlaylist(playlistId, store.currentTrack.id)
+  showPlaylistPicker.value = false
+}
+
+function handleCreatePlaylist() {
+  const name = prompt('请输入歌单名称')
+  if (!name || !name.trim()) return
+  
+  // 创建歌单
+  const newPlaylist = playlistStore.createPlaylist(name.trim())
+  
+  // 如果有当前歌曲，直接添加到新歌单
+  if (store.currentTrack) {
+    trackStorage.saveTrack(store.currentTrack)
+    playlistStore.addToPlaylist(newPlaylist.id, store.currentTrack.id)
   }
+  
   showPlaylistPicker.value = false
 }
 
@@ -891,63 +889,12 @@ function clearPlaylist() {
   </Transition>
 
   <!-- 歌单选择弹窗 -->
-  <Transition name="playlist-popup">
-    <div 
-      v-if="showPlaylistPicker"
-      class="fixed inset-x-0 bottom-0 z-[60] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl"
-      style="max-height: 50vh;"
-    >
-      <!-- 顶部拖拽条 -->
-      <div class="w-full flex justify-center pt-3 pb-2">
-        <div class="w-10 h-1 rounded-full bg-white/20"></div>
-      </div>
-      
-      <!-- 标题栏 -->
-      <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-        <h3 class="text-white font-medium">添加到歌单</h3>
-        <button 
-          @click="showPlaylistPicker = false"
-          class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:bg-white/20 transition-colors"
-        >
-          ✕
-        </button>
-      </div>
-      
-      <!-- 歌单列表 -->
-      <div class="overflow-y-auto max-h-[calc(50vh-80px)] pb-safe-bottom">
-        <div v-if="userPlaylists.length === 0" class="py-12 text-center text-white/40">
-          <p class="text-3xl mb-2">📁</p>
-          <p>暂无歌单</p>
-          <p class="text-sm mt-1">请先创建歌单</p>
-        </div>
-        <div 
-          v-for="playlist in userPlaylists"
-          :key="playlist.id"
-          class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/5 transition-colors"
-          @click="addToPlaylist(playlist.id)"
-        >
-          <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-600/50 to-pink-600/50 flex items-center justify-center">
-            <svg class="w-5 h-5 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
-            </svg>
-          </div>
-          <span class="text-white flex-1">{{ playlist.name }}</span>
-          <svg class="w-5 h-5 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </div>
-      </div>
-    </div>
-  </Transition>
-
-  <!-- 歌单选择遮罩 -->
-  <Transition name="fade">
-    <div 
-      v-if="showPlaylistPicker"
-      class="fixed inset-0 z-[59] bg-black/40"
-      @click="showPlaylistPicker = false"
-    ></div>
-  </Transition>
+  <PlaylistPickerDialog
+    :visible="showPlaylistPicker"
+    @close="showPlaylistPicker = false"
+    @select="addToPlaylist"
+    @create="handleCreatePlaylist"
+  />
 </template>
 
 <style scoped>

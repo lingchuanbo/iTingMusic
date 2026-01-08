@@ -25,7 +25,8 @@ const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
 // 处理原生返回键
 let backButtonListener: any = null
-import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer } from '@/store/ui'
+import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer, isModalOpen } from '@/store/ui'
+
 
 onMounted(async () => {
   if (Capacitor.isNativePlatform()) {
@@ -90,8 +91,15 @@ watch(activeView, (newView) => {
 // 搜索弹窗是否打开
 const isSearchOpen = computed(() => searchBarRef.value?.showMobileSearch ?? false)
 
-// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏）
-const showGlobalSearch = computed(() => activeView.value !== 'settings' && !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value)
+// 是否显示全局搜索按钮（除设置页面外都显示，搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏，弹窗打开时隐藏）
+const showGlobalSearch = computed(() => 
+  activeView.value !== 'settings' && 
+  !isSearchOpen.value && 
+  !aiPickerFullscreen.value && 
+  !playerExpanded.value &&
+  !isModalOpen.value
+)
+
 
 // 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏）
 const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value)
@@ -212,9 +220,7 @@ provide('openGlobalSearch', openGlobalSearch)
     <SearchBar ref="searchBarRef" :popup-only="true" />
 
     <!-- 悬浮播放栏 - 搜索弹窗打开时隐藏 -->
-    <Transition name="player-bar">
-      <PlayerBar v-if="showPlayerBar" />
-    </Transition>
+    <PlayerBar v-if="showPlayerBar" />
 
     <!-- 歌词面板 -->
     <LyricsPanel />

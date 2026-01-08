@@ -139,11 +139,16 @@ watch(currentLyricIndex, (val) => { cachedLyricIndex.value = val })
 
 // 歌词样式（模糊效果）- 简化计算
 function getLyricStyle(index: number) {
-  if (!lyricsSettings.value.blur) return {}
+  const isCurrent = index === cachedLyricIndex.value
   const distance = Math.abs(index - cachedLyricIndex.value)
-  if (distance === 0) {
+  
+  if (isCurrent) {
+    // 当前歌词使用用户设置的颜色
     return { color: lyricsSettings.value.currentColor }
   }
+  
+  if (!lyricsSettings.value.blur) return {}
+  
   if (distance > 5) {
     return { filter: 'blur(3px)', opacity: 0.3 }
   }
@@ -519,7 +524,7 @@ watch(
                 v-if="lyricsDisplayMode !== 'translated'"
                 :class="[
                   'transition-all',
-                  currentLyricIndex === index ? 'text-xl md:text-2xl font-bold text-green-400' : '',
+                  currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
                   isUserScrolling && seekingLyricIndex === index ? 'text-lg font-medium' : ''
                 ]"
               >
@@ -530,7 +535,7 @@ watch(
                 v-if="(lyricsDisplayMode === 'bilingual' || lyricsDisplayMode === 'translated') && translatedLyrics[index]?.text"
                 :class="[
                   'transition-all',
-                  lyricsDisplayMode === 'translated' && currentLyricIndex === index ? 'text-xl md:text-2xl font-bold text-green-400' : '',
+                  lyricsDisplayMode === 'translated' && currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
                   lyricsDisplayMode === 'bilingual' ? 'text-sm mt-0.5 text-purple-300/60' : '',
                   isUserScrolling && seekingLyricIndex === index && lyricsDisplayMode === 'translated' ? 'text-lg font-medium' : ''
                 ]"

@@ -31,7 +31,7 @@ interface BackgroundModePlugin {
 const NativeBackgroundMode = registerPlugin<BackgroundModePlugin>('BackgroundMode')
 
 // 控制动作回调类型
-type ControlActionCallback = (action: 'playPause' | 'next' | 'prev' | 'toggleLyrics') => void
+type ControlActionCallback = (action: 'playPause' | 'next' | 'prev' | 'toggleLyrics' | 'audioFocusLoss' | 'audioFocusGain' | 'audioBecomingNoisy') => void
 
 /**
  * 后台/息屏播放服务

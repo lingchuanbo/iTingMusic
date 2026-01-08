@@ -65,6 +65,36 @@ class AudioPlayer {
         case 'toggleLyrics':
           store.toggleLyrics()
           break
+        case 'audioFocusLoss':
+          // 音频焦点丢失（来电等），暂停播放
+          console.log('AudioPlayer: 音频焦点丢失，暂停播放')
+          if (this.audio && !this.audio.paused) {
+            this.audio.pause()
+          } else if (this.howl && this.howl.playing()) {
+            this.howl.pause()
+          }
+          store.isPlaying = false
+          break
+        case 'audioFocusGain':
+          // 音频焦点恢复，由原生层决定是否恢复播放
+          // 如果原生层设置了 resumeOnFocusGain，它会发送这个事件
+          console.log('AudioPlayer: 音频焦点恢复，恢复播放')
+          if (this.audio) {
+            this.audio.play().catch(e => console.warn('恢复播放失败:', e))
+          } else if (this.howl) {
+            this.howl.play()
+          }
+          break
+        case 'audioBecomingNoisy':
+          // 耳机拔出/蓝牙断开，暂停播放
+          console.log('AudioPlayer: 耳机断开，暂停播放')
+          if (this.audio && !this.audio.paused) {
+            this.audio.pause()
+          } else if (this.howl && this.howl.playing()) {
+            this.howl.pause()
+          }
+          store.isPlaying = false
+          break
       }
     })
   }

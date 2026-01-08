@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { trackStorage } from '@/services/TrackStorage'
+import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
 
 // Props
 defineProps<{
@@ -205,24 +206,60 @@ function batchPlaySelected() {
 // 歌单选择弹窗
 const showPlaylistPicker = ref(false)
 
+// 待添加到歌单的歌曲
+const pendingPlaylistTracks = ref<SearchResult[]>([])
+
 // 打开歌单选择弹窗
-function openPlaylistPicker() {
-  if (selectedItems.value.size === 0) return
+function openPlaylistPicker(result?: SearchResult) {
+  if (result) {
+    pendingPlaylistTracks.value = [result]
+  } else if (selectedItems.value.size > 0) {
+    pendingPlaylistTracks.value = searchResults.value.filter(r => selectedItems.value.has(getResultKey(r)))
+  } else {
+    return
+  }
   showPlaylistPicker.value = true
 }
 
-// 批量添加到指定歌单
-function batchAddToPlaylist2(playlistId: string) {
-  const selected = searchResults.value.filter(r => selectedItems.value.has(getResultKey(r)))
-  selected.forEach(result => {
-    const track = searchResultToTrack(result, quality.value)
-    trackStorage.saveTrack(track)
-    playlistStore.addToPlaylist(playlistId, track.id)
-    store.addTrack(track)
-  })
+// 创建新歌单并添加歌曲
+function handleCreatePlaylist() {
+  const name = prompt('请输入歌单名称')
+  if (!name || !name.trim()) return
+  
+  const newPlaylist = playlistStore.createPlaylist(name.trim())
+  
+  if (pendingPlaylistTracks.value.length > 0) {
+    pendingPlaylistTracks.value.forEach(result => {
+      const track = searchResultToTrack(result, quality.value)
+      trackStorage.saveTrack(track)
+      playlistStore.addToPlaylist(newPlaylist.id, track.id)
+      store.addTrack(track)
+    })
+    showToast(`已创建并添加 ${pendingPlaylistTracks.value.length} 首歌曲`, 'success')
+  }
+  
   showPlaylistPicker.value = false
   exitSelectMode()
+  pendingPlaylistTracks.value = []
 }
+
+// 确认添加到指定歌单
+function confirmAddToPlaylist(playlistId: string) {
+  if (pendingPlaylistTracks.value.length > 0) {
+    pendingPlaylistTracks.value.forEach(result => {
+      const track = searchResultToTrack(result, quality.value)
+      trackStorage.saveTrack(track)
+      playlistStore.addToPlaylist(playlistId, track.id)
+      store.addTrack(track)
+    })
+    showToast(`已成功添加 ${pendingPlaylistTracks.value.length} 首歌曲`, 'success')
+  }
+  showPlaylistPicker.value = false
+  exitSelectMode()
+  pendingPlaylistTracks.value = []
+}
+
+
 
 // 处理点击事件
 function handleResultClick(result: SearchResult) {
@@ -325,21 +362,7 @@ function useQuickPrompt(prompt: string) {
   handleSearch()
 }
 
-async function addToPlaylist(result: SearchResult) {
-  const track = searchResultToTrack(result, quality.value)
-  // 异步获取歌词
-  getLyrics(result.platform, result.id).then(lrc => {
-    const t = store.playlist.find(t => t.id === track.id)
-    if (t) t.lrc = lrc
-  })
-  store.addTrack(track)
-  // 添加视觉反馈：短暂显示成功提示
-  addedFeedback.value = getResultKey(result)
-  showToast(`已添加「${result.name}」`, 'success')
-  setTimeout(() => {
-    addedFeedback.value = ''
-  }, 1000)
-}
+
 
 // 添加成功反馈
 const addedFeedback = ref('')
@@ -576,10 +599,10 @@ function getPlatformIcon(platform: string) {
               <p class="text-white/50 text-xs truncate">{{ result.artist }}</p>
             </div>
             <button
-              @click.stop="addToPlaylist(result)"
+              @click.stop="openPlaylistPicker(result)"
               class="opacity-0 group-hover:opacity-100 px-2 py-1 text-xs rounded bg-white/10 hover:bg-white/20 transition-all"
             >
-              添加
+              添加到歌单
             </button>
           </div>
         </div>
@@ -658,7 +681,7 @@ function getPlatformIcon(platform: string) {
         </Transition>
 
         <!-- 搜索区域 -->
-        <div class="px-4 pt-2 pb-4 flex-shrink-0 relative z-10">
+        <div class="px-4 pt-2 pb-2 flex-shrink-0 relative z-10">
           <!-- 搜索模式切换 -->
           <div class="flex rounded-2xl bg-white/5 p-1 mb-3">
               <button
@@ -778,6 +801,9 @@ function getPlatformIcon(platform: string) {
                 </button>
             </div>
           </div>
+          </div>
+
+
 
         <!-- 搜索结果 -->
           <div class="flex-1 overflow-y-auto min-h-[180px] relative z-10">
@@ -868,10 +894,10 @@ function getPlatformIcon(platform: string) {
                     </div>
                   </div>
                   
-                  <!-- 添加按钮 -->
+                  <!-- 添加到歌单按钮 -->
                   <button
                     v-if="!isSelectMode"
-                    @click.stop="addToPlaylist(result)"
+                    @click.stop="openPlaylistPicker(result)"
                     :class="[
                       'w-9 h-9 rounded-xl flex items-center justify-center transition-all',
                       addedFeedback === getResultKey(result)
@@ -890,6 +916,7 @@ function getPlatformIcon(platform: string) {
               </div>
             </div>
           </div>
+          
           
           <!-- 批量操作栏（多选模式）- 与播放列表样式一致 -->
           <div v-if="isSelectMode && selectedItems.size > 0" class="px-4 pb-safe-bottom pt-2 border-t border-white/5 relative z-10 flex-shrink-0">
@@ -920,7 +947,7 @@ function getPlatformIcon(platform: string) {
                   </div>
                   <span class="text-white/70 text-xs">列表</span>
                 </button>
-                <button @click="openPlaylistPicker" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
+                <button @click="openPlaylistPicker()" :disabled="selectedItems.size === 0" class="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl hover:bg-white/5 disabled:opacity-40 transition-colors group">
                   <div class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-blue-600/20 transition-colors">
                     <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
                   </div>
@@ -937,38 +964,12 @@ function getPlatformIcon(platform: string) {
           </div>
           
           <!-- 歌单选择弹窗 -->
-          <Transition name="fade">
-            <div v-if="showPlaylistPicker" class="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center" @click.self="showPlaylistPicker = false">
-              <div class="w-full max-h-[60vh] bg-neutral-900 rounded-t-2xl overflow-hidden">
-                <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                  <span class="text-white font-medium">添加到歌单</span>
-                  <button @click="showPlaylistPicker = false" class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/60">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                  </button>
-                </div>
-                <div class="overflow-y-auto max-h-[50vh] p-2">
-                  <div v-if="playlistStore.playlists.length === 0" class="text-center py-8 text-white/40">
-                    <p>还没有歌单</p>
-                    <p class="text-sm mt-1">去歌单页面创建一个吧</p>
-                  </div>
-                  <button
-                    v-for="playlist in playlistStore.playlists"
-                    :key="playlist.id"
-                    @click="batchAddToPlaylist2(playlist.id)"
-                    class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/10 transition-colors"
-                  >
-                    <div class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
-                      <svg class="w-5 h-5 text-white/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
-                    </div>
-                    <div class="flex-1 text-left">
-                      <p class="text-white text-sm">{{ playlist.name }}</p>
-                      <p class="text-white/40 text-xs">{{ playlist.trackIds.length }} 首歌曲</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </Transition>
+          <PlaylistPickerDialog
+            :visible="showPlaylistPicker"
+            @close="showPlaylistPicker = false"
+            @select="confirmAddToPlaylist"
+            @create="handleCreatePlaylist"
+          />
           
           <!-- 底部操作栏（非多选模式） -->
           <div v-if="!isSelectMode || selectedItems.size === 0" class="px-4 pb-safe-bottom pt-2 border-t border-white/5 relative z-10 flex-shrink-0">
@@ -999,7 +1000,6 @@ function getPlatformIcon(platform: string) {
               </button>
             </div>
           </div>
-        </div>
       </div>
     </Transition>
   </div>

@@ -544,9 +544,8 @@ OUTPUT:`
         { role: 'user', content: userMessage }
       ],
       temperature: 0.3,
-      max_tokens: 4000,
-      stream: true,
-      stop: ['INPUT:', 'INSTRUCTION:', '---']
+      max_tokens: 8000,
+      stream: false  // 使用非流式请求，更稳定
     })
   })
 
@@ -555,46 +554,24 @@ OUTPUT:`
     throw new Error(`AI 翻译失败: ${response.status} ${error}`)
   }
 
-  const reader = response.body?.getReader()
-  const decoder = new TextDecoder()
-  let fullContent = ''
-
-  // 因为我们在 prompt 的 Response 最后补了 "1:"，为了解析一致性，我们要把它加回来（或者让 AI 补全）
-  // 实际上 AI 会从 "1:" 后面开始补全内容，或者重新输出 "1:..."
-
-  if (reader) {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n').filter((line) => line.trim().startsWith('data:'))
-
-      for (const line of lines) {
-        const data = line.replace('data:', '').trim()
-        if (data === '[DONE]') continue
-
-        try {
-          const json = JSON.parse(data)
-          const delta = json.choices?.[0]?.delta?.content
-          if (delta) {
-            fullContent += delta
-            const parsed = parseNumberedLines(fullContent, lineCount)
-            // 实时应用质量过滤，防止进度条中展示镜像中文
-            const cleanedProgress = cleanTranslationLines(parsed, texts, targetLang, sourceLang)
-            onProgress?.(cleanedProgress)
-          }
-        } catch { /* ignore */ }
-      }
-    }
-  }
+  const json = await response.json()
+  const fullContent = json.choices?.[0]?.message?.content || ''
 
   if (!fullContent && lineCount > 0) {
+    console.error('[AI翻译] 返回内容为空')
     throw new Error('AI 返回内容为空')
   }
 
-  // 最终解析并返回
-  return parseNumberedLines(fullContent, lineCount)
+  // 解析翻译结果
+  const parsed = parseNumberedLines(fullContent, lineCount)
+
+  // 通知进度（一次性完成）
+  if (onProgress) {
+    const cleanedProgress = cleanTranslationLines(parsed, texts, targetLang, sourceLang)
+    onProgress(cleanedProgress)
+  }
+
+  return parsed
 }
 
 // 解析带行号的翻译结果
