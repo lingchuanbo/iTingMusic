@@ -4,6 +4,8 @@ import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
 import { audioCache } from '@/services/cache/AudioCache'
 import { backgroundMode } from '@/services/player/BackgroundMode'
+import { equalizerService } from '@/services/player/EqualizerService'
+import { nativeAudioPlayer } from '@/services/player/NativeAudioPlayer'
 import { getActualMusicUrl, type MusicSource } from '@/services/source/OnlineApiSource'
 import type { Track } from '@/types'
 
@@ -17,14 +19,14 @@ class AudioPlayer {
   private howl: Howl | null = null
   private audio: HTMLAudioElement | null = null
   private rafId: number | null = null
-  private useNativeAudio: boolean = false
+  private useExoPlayer: boolean = false // 使用原生 ExoPlayer
   private errorCount: number = 0
   private maxErrors: number = 3
   private controlCallbackSetup: boolean = false
 
   constructor() {
-    // Android 平台强制使用原生 Audio，因为 Howler 在后台会被暂停
-    this.useNativeAudio = Capacitor.isNativePlatform()
+    // Android 平台使用原生 ExoPlayer
+    this.useExoPlayer = Capacitor.isNativePlatform()
 
     // 监听页面可见性变化，确保后台播放
     if (typeof document !== 'undefined') {
@@ -41,6 +43,9 @@ class AudioPlayer {
   private setupNotificationControls() {
     if (this.controlCallbackSetup) return
     this.controlCallbackSetup = true
+
+    // Android ExoPlayer 处理自己的通知和控制，不需要 backgroundMode
+    if (this.useExoPlayer) return
 
     backgroundMode.setControlCallback((action) => {
       const store = usePlayerStore()
@@ -104,6 +109,9 @@ class AudioPlayer {
    */
   private handleVisibilityChange() {
     const store = usePlayerStore()
+    // Android ExoPlayer 处理自己的后台逻辑，不需要旧的 backgroundMode
+    if (this.useExoPlayer) return
+
     if (document.hidden && store.isPlaying && store.backgroundPlayEnabled) {
       // 页面进入后台，确保后台服务运行
       backgroundMode.enable({
@@ -156,29 +164,43 @@ class AudioPlayer {
     // 在线歌曲处理
     if (track?.source === 'online' && track.id) {
       try {
-        // 先检查缓存
-        const cachedUrl = await audioCache.get(track.id)
-        if (cachedUrl) {
-          playUrl = cachedUrl
-          store.setCached(true)
-          store.setBuffered(100)
-        } else if (offlineStore.isOfflineMode) {
-          // 离线模式下，没有缓存则跳过
-          this.handlePlayError(store)
-          return
-        } else if (onlineTrack._platform && onlineTrack._songId) {
-          store.setCached(false)
-          store.setBuffered(0)
-          // 解析实际音频 URL
-          const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
-          if (actualUrl) {
-            playUrl = actualUrl
-            // 后台缓存
-            this.cacheInBackground(track.id, playUrl, track)
-          } else {
-            console.error('无法获取音频URL')
+        // ExoPlayer 不能使用 blob 缓存，需要直接使用 HTTP URL
+        if (this.useExoPlayer) {
+          // Android ExoPlayer: 跳过 blob 缓存，直接获取 HTTP URL
+          if (onlineTrack._platform && onlineTrack._songId) {
+            store.setCached(false)
+            store.setBuffered(0)
+            const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
+            if (actualUrl) {
+              playUrl = actualUrl
+            } else {
+              console.error('无法获取音频URL')
+              this.handlePlayError(store)
+              return
+            }
+          }
+        } else {
+          // Web 端: 优先使用 blob 缓存
+          const cachedUrl = await audioCache.get(track.id)
+          if (cachedUrl) {
+            playUrl = cachedUrl
+            store.setCached(true)
+            store.setBuffered(100)
+          } else if (offlineStore.isOfflineMode) {
             this.handlePlayError(store)
             return
+          } else if (onlineTrack._platform && onlineTrack._songId) {
+            store.setCached(false)
+            store.setBuffered(0)
+            const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
+            if (actualUrl) {
+              playUrl = actualUrl
+              this.cacheInBackground(track.id, playUrl, track)
+            } else {
+              console.error('无法获取音频URL')
+              this.handlePlayError(store)
+              return
+            }
           }
         }
       } catch (e) {
@@ -187,7 +209,6 @@ class AudioPlayer {
         return
       }
     } else {
-      // 本地文件，直接标记为已缓存
       store.setCached(true)
       store.setBuffered(100)
     }
@@ -195,129 +216,31 @@ class AudioPlayer {
     // 成功开始播放，重置错误计数
     this.errorCount = 0
 
-    // 在 Android 上，播放前先启动后台服务
-    if (this.useNativeAudio && store.backgroundPlayEnabled) {
-      await backgroundMode.enable({
-        title: track?.title,
-        artist: track?.artist,
-        cover: track?.cover,
-        isPlaying: true,
-        duration: 0
-      })
+    // Android 使用 ExoPlayer
+    if (this.useExoPlayer) {
+      try {
+        console.log('AudioPlayer: ExoPlayer play URL:', playUrl.substring(0, 80))
+
+        // 直接播放单曲，由前端管理切歌逻辑
+        await nativeAudioPlayer.play(playUrl, track)
+
+        // 同步播放模式（用于单曲循环）
+        await nativeAudioPlayer.setPlayMode(store.playMode)
+
+        store.isPlaying = true
+        console.log('AudioPlayer: ExoPlayer 播放开始')
+      } catch (e) {
+        console.error('AudioPlayer: ExoPlayer 播放失败', e)
+        this.handlePlayError(store)
+      }
+      return
     }
 
-    if (this.useNativeAudio) {
-      this.playWithNativeAudio(playUrl, track, store)
-    } else {
-      this.playWithHowler(playUrl, track, store)
-    }
+    // Web 端使用 Howler
+    this.playWithHowler(playUrl, track, store)
   }
-
-  /**
-   * 使用原生 HTML5 Audio 播放（安卓）
-   */
-  private playWithNativeAudio(playUrl: string, track: Track | undefined, store: ReturnType<typeof usePlayerStore>) {
-    this.audio = new Audio()
-    this.audio.crossOrigin = 'anonymous'
-    this.audio.preload = 'auto'
-    this.audio.volume = store.volume
-
-    // 保存当前 track 引用用于事件处理
-    const currentTrack = track
-    let hasStartedPlaying = false
-
-    this.audio.oncanplaythrough = () => {
-      this.audio?.play().catch(e => {
-        console.error('原生Audio: play() 失败', e)
-      })
-    }
-
-    this.audio.onplay = () => {
-      hasStartedPlaying = true
-      this.errorCount = 0 // 播放成功，重置错误计数
-      store.isPlaying = true
-      this.startNativeProgress()
-
-      if (store.backgroundPlayEnabled) {
-        backgroundMode.enable({
-          title: currentTrack?.title,
-          artist: currentTrack?.artist,
-          cover: currentTrack?.cover,
-          isPlaying: true,
-          duration: this.audio?.duration || 0
-        })
-        backgroundMode.updatePlayState(true)
-      }
-    }
-
-    this.audio.onpause = () => {
-      // 只有在非后台状态下才更新 isPlaying
-      if (!document.hidden) {
-        store.isPlaying = false
-      }
-      // 更新通知栏状态
-      backgroundMode.updatePlayState(false)
-    }
-
-    this.audio.onended = () => {
-      if (store.playMode === 'single') {
-        // 单曲循环
-        if (this.audio) {
-          this.audio.currentTime = 0
-          this.audio.play()
-        }
-      } else {
-        // 切换下一首
-        store.nextTrack()
-      }
-    }
-
-    this.audio.onloadedmetadata = () => {
-      const audioDuration = this.audio?.duration || 0
-      store.setDuration(audioDuration)
-
-      // 更新通知栏时长
-      if (store.backgroundPlayEnabled && currentTrack && audioDuration > 0) {
-        backgroundMode.updateNotification({
-          title: currentTrack.title,
-          artist: currentTrack.artist,
-          cover: currentTrack.cover,
-          duration: audioDuration
-        })
-      }
-    }
-
-    this.audio.onerror = (e) => {
-      // 如果已经开始播放了，忽略错误事件（可能是之前的残留事件）
-      if (hasStartedPlaying) {
-        console.warn('原生Audio: 忽略播放后的错误事件')
-        return
-      }
-      console.error('原生Audio: 播放失败', e, this.audio?.error)
-      store.isPlaying = false
-      this.handlePlayError(store)
-    }
-
-    // 监听 timeupdate 作为备用进度更新（后台时 RAF 可能不工作）
-    this.audio.ontimeupdate = () => {
-      if (this.audio) {
-        store.setCurrentTime(this.audio.currentTime)
-      }
-    }
-
-    // 监听缓冲进度
-    this.audio.onprogress = () => {
-      if (this.audio && this.audio.buffered.length > 0 && this.audio.duration > 0) {
-        const bufferedEnd = this.audio.buffered.end(this.audio.buffered.length - 1)
-        const bufferedPercent = (bufferedEnd / this.audio.duration) * 100
-        store.setBuffered(bufferedPercent)
-      }
-    }
-
-    // 设置 src 触发加载
-    this.audio.src = playUrl
-    this.audio.load()
-  }
+  // 注意：Android 现在使用 ExoPlayer（原生播放器），不再使用 HTML5 Audio
+  // playWithNativeAudio 方法已移除
 
   /**
    * 使用 Howler 播放（桌面浏览器）
@@ -335,7 +258,7 @@ class AudioPlayer {
       onplay: () => {
         store.isPlaying = true
         this.startHowlerProgress()
-        if (store.backgroundPlayEnabled) {
+        if (store.backgroundPlayEnabled && !this.useExoPlayer) {
           backgroundMode.enable({
             title: track?.title,
             artist: track?.artist,
@@ -360,6 +283,20 @@ class AudioPlayer {
       },
       onload: () => {
         store.setDuration(this.howl?.duration() || 0)
+
+        // 连接均衡器（Web 端）
+        try {
+          // 获取 Howler 内部的 Audio 元素
+          const howlAny = this.howl as any
+          if (howlAny._sounds && howlAny._sounds[0] && howlAny._sounds[0]._node) {
+            const audioNode = howlAny._sounds[0]._node as HTMLAudioElement
+            equalizerService.disconnect()
+            equalizerService.connectAudioElement(audioNode)
+            console.log('AudioPlayer: 已连接均衡器')
+          }
+        } catch (e) {
+          console.warn('连接均衡器失败:', e)
+        }
       },
       onloaderror: (_id, error) => {
         console.error('Howler: 音频加载失败:', error, playUrl)
@@ -398,14 +335,36 @@ class AudioPlayer {
   }
 
   toggle(): boolean {
-    if (this.useNativeAudio && this.audio) {
-      if (this.audio.paused) {
-        this.audio.play()
-      } else {
-        this.audio.pause()
+    // Android 使用 ExoPlayer
+    if (this.useExoPlayer) {
+      const store = usePlayerStore()
+
+      // 如果没有当前歌曲，直接返回 false
+      if (!store.currentTrack) {
+        return false
       }
+
+      // 异步检查 ExoPlayer 状态并处理
+      nativeAudioPlayer.toggle().then((toggled) => {
+        console.log('AudioPlayer: toggle result =', toggled)
+        if (!toggled) {
+          // ExoPlayer 没有媒体加载（应用重启后），需要重新播放当前歌曲
+          console.log('AudioPlayer: ExoPlayer 无媒体，重新加载当前歌曲')
+          this.play(store.currentTrack!.url, store.currentTrack!)
+        } else {
+          // toggle 成功，更新 store 状态
+          nativeAudioPlayer.getState().then(state => {
+            store.isPlaying = state.isPlaying
+          })
+        }
+      })
+
+      // 返回 true 表示处理中，但不要让上层立即更新 isPlaying
+      // 由异步回调来更新正确的状态
       return true
-    } else if (this.howl) {
+    }
+    // Web 端使用 Howler
+    if (this.howl) {
       if (this.howl.playing()) {
         this.howl.pause()
       } else {
@@ -413,7 +372,7 @@ class AudioPlayer {
       }
       return true
     }
-    return false // 没有 audio 实例
+    return false
   }
 
   seek(time: number) {
@@ -421,62 +380,31 @@ class AudioPlayer {
     // 立即更新 store 中的时间
     store.setCurrentTime(time)
 
-    if (this.useNativeAudio && this.audio) {
-      this.audio.currentTime = time
-      // 确保进度更新继续
-      if (!this.audio.paused) {
-        this.startNativeProgress()
-      }
-    } else if (this.howl) {
-      // 检查 howl 是否已加载
-      if (this.howl.state() === 'loaded') {
-        this.howl.seek(time)
-        // seek 后重新启动进度更新
-        if (store.isPlaying) {
-          this.startHowlerProgress()
-        }
+    // Android 使用 ExoPlayer
+    if (this.useExoPlayer) {
+      nativeAudioPlayer.seek(time)
+      return
+    }
+    // Web 端使用 Howler
+    if (this.howl && this.howl.state() === 'loaded') {
+      this.howl.seek(time)
+      if (store.isPlaying) {
+        this.startHowlerProgress()
       }
     }
   }
 
   setVolume(v: number) {
-    if (this.useNativeAudio && this.audio) {
-      this.audio.volume = v
-    } else {
-      this.howl?.volume(v)
+    // Android 使用 ExoPlayer
+    if (this.useExoPlayer) {
+      nativeAudioPlayer.setVolume(v)
+      return
     }
+    // Web 端使用 Howler
+    this.howl?.volume(v)
   }
 
-  private startNativeProgress() {
-    // 先取消之前的更新循环
-    if (this.rafId) {
-      cancelAnimationFrame(this.rafId)
-      this.rafId = null
-    }
-
-    const store = usePlayerStore()
-    let lastUpdate = 0
-    const UPDATE_INTERVAL = 250 // 降低更新频率到 250ms，省电
-
-    const update = (timestamp: number) => {
-      if (this.audio && !this.audio.paused) {
-        // 节流：只在间隔时间后更新
-        if (timestamp - lastUpdate >= UPDATE_INTERVAL) {
-          store.setCurrentTime(this.audio.currentTime)
-          lastUpdate = timestamp
-        }
-        // 页面可见时才继续 RAF，后台时依赖 timeupdate 事件
-        if (!document.hidden) {
-          this.rafId = requestAnimationFrame(update)
-        } else {
-          this.rafId = null
-        }
-      } else {
-        this.rafId = null
-      }
-    }
-    this.rafId = requestAnimationFrame(update)
-  }
+  // startNativeProgress 方法已移除 - Android 现在使用 ExoPlayer 的 onProgress 事件
 
   private startHowlerProgress() {
     // 先取消之前的更新循环
@@ -516,6 +444,8 @@ class AudioPlayer {
   destroy() {
     if (this.rafId) cancelAnimationFrame(this.rafId)
 
+    // ExoPlayer 不需要在这里销毁，由服务管理
+    // 只清理 Web 端资源
     if (this.audio) {
       this.audio.pause()
       this.audio.src = ''
@@ -530,8 +460,12 @@ class AudioPlayer {
    * 完全停止播放并关闭后台服务
    */
   stop() {
-    this.destroy()
-    backgroundMode.disable()
+    if (this.useExoPlayer) {
+      nativeAudioPlayer.stop()
+    } else {
+      this.destroy()
+      backgroundMode.disable()
+    }
   }
 
   /**
@@ -540,9 +474,11 @@ class AudioPlayer {
   setBackgroundPlay(enabled: boolean, track?: Track) {
     const store = usePlayerStore()
     store.backgroundPlayEnabled = enabled
-    const isPlaying = this.useNativeAudio
-      ? (this.audio && !this.audio.paused)
-      : this.howl?.playing()
+
+    // Android ExoPlayer 不需要处理这个，它默认就支持后台
+    if (this.useExoPlayer) return
+
+    const isPlaying = this.howl?.playing()
 
     if (enabled && isPlaying) {
       backgroundMode.enable({
@@ -561,6 +497,7 @@ class AudioPlayer {
    * 更新通知栏信息（切歌时调用）
    */
   updateNotification(title: string, artist: string, cover?: string, duration?: number) {
+    if (this.useExoPlayer) return
     backgroundMode.updateNotification({ title, artist, cover, duration })
   }
 }

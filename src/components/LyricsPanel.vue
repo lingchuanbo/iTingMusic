@@ -2,6 +2,7 @@
 import { computed, ref, shallowRef, watch, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
+import { Capacitor } from '@capacitor/core'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { getLyrics, type MusicSource } from '@/services/source/OnlineApiSource'
 import { formatTime } from '@/utils/formatTime'
@@ -262,8 +263,18 @@ async function refreshLyrics() {
 
 // 播放控制
 function handleToggle() {
-  audioPlayer.toggle()
-  store.togglePlay()
+  // Android ExoPlayer 场景：audioPlayer.toggle() 会异步处理所有逻辑
+  const toggled = audioPlayer.toggle()
+  
+  if (!toggled && store.currentTrack) {
+    store.playTrack(store.currentIndex)
+    return
+  }
+  
+  // 对于 Android，audioPlayer.toggle() 的异步回调会更新 store.isPlaying
+  if (!Capacitor.isNativePlatform()) {
+    store.togglePlay()
+  }
 }
 
 // 进度条拖动

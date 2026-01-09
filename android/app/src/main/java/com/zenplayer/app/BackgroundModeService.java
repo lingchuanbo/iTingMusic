@@ -12,6 +12,9 @@ import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -39,6 +42,10 @@ public class BackgroundModeService extends Service {
     public static final String ACTION_UPDATE_STATE = "com.zenplayer.app.UPDATE_STATE";
     public static final String ACTION_UPDATE_PROGRESS = "com.zenplayer.app.UPDATE_PROGRESS";
     public static final String ACTION_TOGGLE_LYRICS = "com.zenplayer.app.TOGGLE_LYRICS";
+    // 音频焦点相关动作
+    public static final String ACTION_AUDIO_FOCUS_LOSS = "com.zenplayer.app.AUDIO_FOCUS_LOSS";
+    public static final String ACTION_AUDIO_FOCUS_GAIN = "com.zenplayer.app.AUDIO_FOCUS_GAIN";
+    public static final String ACTION_AUDIO_BECOMING_NOISY = "com.zenplayer.app.AUDIO_BECOMING_NOISY";
     
     private static final String CHANNEL_ID = "zenplayer_playback";
     private static final int NOTIFICATION_ID = 1001;
@@ -58,6 +65,98 @@ public class BackgroundModeService extends Service {
     private ExecutorService executor = Executors.newSingleThreadExecutor();
     private Handler mainHandler = new Handler(Looper.getMainLooper());
 
+    // 音频焦点管理
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean hasAudioFocus = false;
+    private boolean playbackDelayed = false;
+    private boolean resumeOnFocusGain = false;
+    private boolean audioFocusRequested = false; // 标记是否已请求过音频焦点
+    private final Object focusLock = new Object();
+
+    // 音频焦点变化监听器
+    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = 
+        new AudioManager.OnAudioFocusChangeListener() {
+            @Override
+            public void onAudioFocusChange(int focusChange) {
+                switch (focusChange) {
+                    case AudioManager.AUDIOFOCUS_GAIN:
+                        android.util.Log.d("BackgroundModeService", "音频焦点: GAIN - 恢复播放");
+                        synchronized (focusLock) {
+                            hasAudioFocus = true;
+                            if (playbackDelayed || resumeOnFocusGain) {
+                                playbackDelayed = false;
+                                resumeOnFocusGain = false;
+                                // 通知前端恢复播放
+                                isPlaying = true;
+                                updatePlaybackState();
+                                updateNotification();
+                                sendControlBroadcast(ACTION_AUDIO_FOCUS_GAIN);
+                            }
+                        }
+                        break;
+                    
+                    case AudioManager.AUDIOFOCUS_LOSS:
+                        android.util.Log.d("BackgroundModeService", "音频焦点: LOSS - 永久丢失");
+                        synchronized (focusLock) {
+                            hasAudioFocus = false;
+                            resumeOnFocusGain = false;
+                            playbackDelayed = false;
+                            // 重要：对于音乐播放应用，即使音频焦点永久丢失，也不自动暂停
+                            // 因为可能是系统省电模式导致的焦点丢失，而不是用户操作
+                            // 我们继续播放，但记录焦点状态
+                            // isPlaying 保持不变，继续播放
+                            android.util.Log.d("BackgroundModeService", "音频焦点丢失，但继续播放");
+                            // 不更新播放状态，保持当前播放状态
+                            // 仅更新通知以反映当前状态
+                            updateNotification();
+                        }
+                        break;
+                    
+                    case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                        android.util.Log.d("BackgroundModeService", "音频焦点: LOSS_TRANSIENT - 临时丢失(来电等)");
+                        synchronized (focusLock) {
+                            hasAudioFocus = false;
+                            // 记录是否需要在焦点恢复后继续播放
+                            resumeOnFocusGain = isPlaying;
+                            playbackDelayed = false;
+                            // 对于临时焦点丢失，继续播放
+                            // isPlaying 保持不变，继续播放
+                            android.util.Log.d("BackgroundModeService", "音频焦点临时丢失，但继续播放");
+                            // 不更新播放状态，保持当前播放状态
+                            updateNotification();
+                        }
+                        break;
+                    
+                    case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                        android.util.Log.d("BackgroundModeService", "音频焦点: LOSS_TRANSIENT_CAN_DUCK - 可降低音量");
+                        // 对于短暂的焦点丢失（如通知声音），不暂停播放，仅记录状态
+                        // 如果需要暂停，应该等待更持久的焦点丢失事件
+                        synchronized (focusLock) {
+                            // 不改变 hasAudioFocus，因为这是临时的
+                            // 不暂停播放，继续播放
+                            android.util.Log.d("BackgroundModeService", "DUCK: 继续播放，不暂停");
+                        }
+                        break;
+                }
+            }
+        };
+
+    // 耳机拔出/蓝牙断开广播接收器
+    private BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                android.util.Log.d("BackgroundModeService", "检测到音频将变得嘈杂(耳机拔出/蓝牙断开)");
+                // 暂停播放
+                isPlaying = false;
+                updatePlaybackState();
+                updateNotification();
+                sendControlBroadcast(ACTION_AUDIO_BECOMING_NOISY);
+            }
+        }
+    };
+
     // 广播接收器 - 接收来自前端的控制命令响应
     private BroadcastReceiver controlReceiver = new BroadcastReceiver() {
         @Override
@@ -72,6 +171,7 @@ public class BackgroundModeService extends Service {
         createNotificationChannel();
         createMediaSession();
         acquireWakeLock();
+        setupAudioFocus();
         
         // 注册广播接收器
         IntentFilter filter = new IntentFilter();
@@ -80,6 +180,88 @@ public class BackgroundModeService extends Service {
             registerReceiver(controlReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
             registerReceiver(controlReceiver, filter);
+        }
+        
+        // 注册耳机拔出/蓝牙断开广播接收器
+        IntentFilter noisyFilter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(becomingNoisyReceiver, noisyFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(becomingNoisyReceiver, noisyFilter);
+        }
+    }
+
+    /**
+     * 设置音频焦点
+     */
+    private void setupAudioFocus() {
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build();
+            
+            audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(audioAttributes)
+                .setAcceptsDelayedFocusGain(true)
+                .setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
+                .build();
+        }
+    }
+
+    /**
+     * 请求音频焦点
+     */
+    private boolean requestAudioFocus() {
+        if (audioManager == null) {
+            setupAudioFocus();
+        }
+        
+        int result;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            result = audioManager.requestAudioFocus(audioFocusRequest);
+        } else {
+            result = audioManager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            );
+        }
+        
+        synchronized (focusLock) {
+            if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                android.util.Log.d("BackgroundModeService", "音频焦点请求成功");
+                hasAudioFocus = true;
+                return true;
+            } else if (result == AudioManager.AUDIOFOCUS_REQUEST_DELAYED) {
+                android.util.Log.d("BackgroundModeService", "音频焦点请求延迟");
+                playbackDelayed = true;
+                return false;
+            } else {
+                android.util.Log.d("BackgroundModeService", "音频焦点请求失败");
+                hasAudioFocus = false;
+                return false;
+            }
+        }
+    }
+
+    /**
+     * 放弃音频焦点
+     */
+    private void abandonAudioFocus() {
+        if (audioManager != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            } else {
+                audioManager.abandonAudioFocus(audioFocusChangeListener);
+            }
+            synchronized (focusLock) {
+                hasAudioFocus = false;
+            }
+            android.util.Log.d("BackgroundModeService", "已放弃音频焦点");
         }
     }
 
@@ -162,10 +344,23 @@ public class BackgroundModeService extends Service {
             if (currentArtist == null) currentArtist = "未知艺术家";
             if (currentCover == null) currentCover = "";
             
+            // 注意: 不再请求音频焦点!
+            // ExoPlayerService 使用 Media3 自动管理音频焦点,
+            // 这里重复请求会导致焦点冲突，造成息屏后播放停止
+            // if (!audioFocusRequested) {
+            //     requestAudioFocus();
+            //     audioFocusRequested = true;
+            // }
+            android.util.Log.d("BackgroundModeService", "跳过音频焦点请求 - ExoPlayerService 自动管理");
+            
             loadCoverAndNotify(true);
             isRunning = true;
             
         } else if (ACTION_STOP.equals(action)) {
+            // 放弃音频焦点和 WakeLock
+            abandonAudioFocus();
+            audioFocusRequested = false; // 重置标记，下次启动时重新请求
+            releaseWakeLock();
             stopForeground(true);
             stopSelf();
             isRunning = false;
@@ -422,7 +617,10 @@ public class BackgroundModeService extends Service {
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "ZenPlayer::BackgroundPlayback"
             );
+            // 设置引用计数为 false，确保 acquire() 和 release() 调用不会嵌套
+            wakeLock.setReferenceCounted(false);
             wakeLock.acquire();
+            android.util.Log.d("BackgroundModeService", "WakeLock 已获取");
         }
     }
 
@@ -437,12 +635,19 @@ public class BackgroundModeService extends Service {
     public void onDestroy() {
         super.onDestroy();
         releaseWakeLock();
+        abandonAudioFocus();
+        audioFocusRequested = false; // 重置标记
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
         }
         try {
             unregisterReceiver(controlReceiver);
+        } catch (Exception e) {
+            // ignore
+        }
+        try {
+            unregisterReceiver(becomingNoisyReceiver);
         } catch (Exception e) {
             // ignore
         }

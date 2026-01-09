@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace = "com.zenplayer.app"
@@ -31,6 +32,15 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    
+    kotlinOptions {
+        jvmTarget = '17'
+    }
 }
 
 repositories {
@@ -45,8 +55,22 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
-    // Media session support for notification controls
+    
+    // Kotlin
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    
+    // Media3 ExoPlayer - 原生音频播放
+    implementation "androidx.media3:media3-exoplayer:1.2.1"
+    implementation "androidx.media3:media3-session:1.2.1"
+    implementation "androidx.media3:media3-datasource-okhttp:1.2.1"
+    implementation "androidx.media3:media3-common:1.2.1"
+    
+    // OkHttp for network requests
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    
+    // AndroidX Media (旧版 BackgroundModeService 需要)
     implementation "androidx.media:media:1.7.0"
+    
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

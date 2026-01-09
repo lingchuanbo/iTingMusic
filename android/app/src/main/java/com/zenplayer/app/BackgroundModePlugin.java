@@ -59,6 +59,21 @@ public class BackgroundModePlugin extends Plugin {
                         data.put("action", "toggleLyrics");
                         notifyListeners("controlAction", data);
                         break;
+                    case BackgroundModeService.ACTION_AUDIO_FOCUS_LOSS:
+                        android.util.Log.d("BackgroundModePlugin", "通知前端: audioFocusLoss");
+                        data.put("action", "audioFocusLoss");
+                        notifyListeners("controlAction", data);
+                        break;
+                    case BackgroundModeService.ACTION_AUDIO_FOCUS_GAIN:
+                        android.util.Log.d("BackgroundModePlugin", "通知前端: audioFocusGain");
+                        data.put("action", "audioFocusGain");
+                        notifyListeners("controlAction", data);
+                        break;
+                    case BackgroundModeService.ACTION_AUDIO_BECOMING_NOISY:
+                        android.util.Log.d("BackgroundModePlugin", "通知前端: audioBecomingNoisy");
+                        data.put("action", "audioBecomingNoisy");
+                        notifyListeners("controlAction", data);
+                        break;
                 }
             }
         };
@@ -68,6 +83,9 @@ public class BackgroundModePlugin extends Plugin {
         filter.addAction(BackgroundModeService.ACTION_NEXT);
         filter.addAction(BackgroundModeService.ACTION_PREV);
         filter.addAction(BackgroundModeService.ACTION_TOGGLE_LYRICS);
+        filter.addAction(BackgroundModeService.ACTION_AUDIO_FOCUS_LOSS);
+        filter.addAction(BackgroundModeService.ACTION_AUDIO_FOCUS_GAIN);
+        filter.addAction(BackgroundModeService.ACTION_AUDIO_BECOMING_NOISY);
         
         Context context = getContext();
         // 使用 RECEIVER_EXPORTED 因为广播来自同一应用的 Service

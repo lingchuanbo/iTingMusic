@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
+import { useEqualizerStore } from '@/store/equalizer'
 import type { AudioQuality, MusicSource } from '@/services/source/OnlineApiSource'
 import {
   loadAIConfig,
@@ -13,9 +14,14 @@ import {
 } from '@/services/ai/AIService'
 import { audioCache } from '@/services/cache/AudioCache'
 import { downloadService, type DownloadSettings } from '@/services/DownloadService'
+import EqualizerView from '@/components/EqualizerView.vue'
 
 const store = usePlayerStore()
 const offlineStore = useOfflineStore()
+const eqStore = useEqualizerStore()
+
+// 均衡器全屏显示状态
+const showEqualizer = ref(false)
 
 // 下载设置
 const downloadSettings = ref<DownloadSettings>(downloadService.getSettings())
@@ -381,6 +387,27 @@ function toggleSection(section: string) {
                  [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-purple-500 
                  [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
         />
+      </section>
+
+      <!-- 均衡器 -->
+      <section class="bg-white/5 rounded-xl overflow-hidden">
+        <button 
+          @click="showEqualizer = true"
+          class="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        >
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="4" width="4" height="16" rx="1"/>
+              <rect x="10" y="8" width="4" height="12" rx="1"/>
+              <rect x="16" y="2" width="4" height="20" rx="1"/>
+            </svg>
+            <span class="text-white font-medium">均衡器</span>
+            <span class="text-white/40 text-sm">{{ eqStore.enabled ? '已开启' : '已关闭' }}</span>
+          </div>
+          <svg class="w-5 h-5 text-white/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m9 18 6-6-6-6"/>
+          </svg>
+        </button>
       </section>
 
       <!-- AI 配置 -->
@@ -766,4 +793,30 @@ function toggleSection(section: string) {
       </section>
     </div>
   </div>
+
+  <!-- 均衡器全屏覆盖层 -->
+  <Teleport to="body">
+    <Transition name="eq-slide">
+      <div 
+        v-if="showEqualizer"
+        class="fixed inset-0 z-[100] bg-black"
+      >
+        <EqualizerView @close="showEqualizer = false" />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
+
+<style scoped>
+/* 均衡器滑入动画 */
+.eq-slide-enter-active,
+.eq-slide-leave-active {
+  transition: transform 0.3s ease;
+}
+.eq-slide-enter-from {
+  transform: translateX(100%);
+}
+.eq-slide-leave-to {
+  transform: translateX(100%);
+}
+</style>

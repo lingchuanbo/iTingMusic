@@ -3,6 +3,7 @@ import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { Capacitor } from '@capacitor/core'
+import { nativeAudioPlayer } from '@/services/player/NativeAudioPlayer'
 import Sidebar from '@/components/Sidebar.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import SongList from '@/components/SongList.vue'
@@ -69,6 +70,9 @@ onMounted(async () => {
     } catch (e) {
       console.warn('Capacitor App plugin not available:', e)
     }
+
+    // 初始化原生播放器监听器
+    nativeAudioPlayer.init().catch(e => console.error('初始化原生播放器失败:', e))
   }
 })
 
@@ -129,6 +133,13 @@ watch(() => store.playVersion, () => {
 // 监听音量变化
 watch(() => store.volume, (v) => {
   audioPlayer.setVolume(v)
+})
+
+// 监听播放模式变化，同步给 ExoPlayer
+watch(() => store.playMode, (mode) => {
+  if (Capacitor.isNativePlatform()) {
+    nativeAudioPlayer.setPlayMode(mode)
+  }
 })
 
 function handleNavigate(id: string) {

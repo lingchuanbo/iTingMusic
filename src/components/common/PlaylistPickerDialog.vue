@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { usePlaylistStore } from '@/store/playlist'
 
-const props = defineProps<{
+defineProps<{
   visible: boolean
 }>()
 

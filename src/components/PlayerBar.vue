@@ -4,17 +4,22 @@ import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { isSelectMode, isModalOpen, setPlayerExpanded, showPlaylist, showPlaylistPicker, registerCollapsePlayer } from '@/store/ui'
 import { audioPlayer } from '@/services/player/AudioPlayer'
+import { Capacitor } from '@capacitor/core'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { trackStorage } from '@/services/TrackStorage'
 import CachedImage from '@/components/common/CachedImage.vue'
 import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
+import EqualizerView from '@/components/EqualizerView.vue'
 
 const store = usePlayerStore()
 const playlistStore = usePlaylistStore()
 const playlistDragY = ref(0)
 const isDraggingPlaylist = ref(false)
 let playlistTouchStartY = 0
+
+// EQ 状态
+const showEQ = ref(false)
 
 // Favorite functionality
 const favoriteVersion = ref(0)
@@ -402,16 +407,21 @@ const displayLyrics = computed(() => {
 
 // 播放控制
 function handleToggle() {
-  if (store.currentTrack && !store.isPlaying) {
-    const toggled = audioPlayer.toggle()
-    if (!toggled) {
-      store.playTrack(store.currentIndex)
-      return
-    }
-  } else {
-    audioPlayer.toggle()
+  // Android ExoPlayer 场景：audioPlayer.toggle() 会异步处理所有逻辑
+  // 包括检查是否有媒体、加载歌曲、更新 isPlaying 状态
+  const toggled = audioPlayer.toggle()
+  
+  // 如果 toggle 返回 false（没有当前歌曲），使用 playTrack 启动播放
+  if (!toggled && store.currentTrack) {
+    store.playTrack(store.currentIndex)
+    return
   }
-  store.togglePlay()
+  
+  // 对于 Android，audioPlayer.toggle() 的异步回调会更新 store.isPlaying
+  // 这里检查是否是 Web 端（通过检查 Capacitor）
+  if (!Capacitor.isNativePlatform()) {
+    store.togglePlay()
+  }
 }
 
 // 切换播放列表浮窗
@@ -679,6 +689,19 @@ function clearPlaylist() {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
           </div>
+
+          <!-- EQ Button -->
+          <button 
+            @click.stop="showEQ = true"
+            class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center transition-all active:scale-90"
+            title="均衡器"
+          >
+            <svg class="w-5 h-5 text-white/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="4" y="5" width="3" height="14" rx="1"/>
+              <rect x="10.5" y="8" width="3" height="11" rx="1"/>
+              <rect x="17" y="3" width="3" height="18" rx="1"/>
+            </svg>
+          </button>
         </div>
         
         <!-- Lyrics Display (2 lines) - 点击进入歌词页 -->
@@ -895,6 +918,18 @@ function clearPlaylist() {
     @select="addToPlaylist"
     @create="handleCreatePlaylist"
   />
+
+  <!-- 均衡器全屏覆盖层 -->
+  <Teleport to="body">
+    <Transition name="eq-slide">
+      <div 
+        v-if="showEQ"
+        class="fixed inset-0 z-[200] bg-black"
+      >
+        <EqualizerView @close="showEQ = false" />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1075,5 +1110,17 @@ function clearPlaylist() {
   100% {
     background-position: -100% 0;
   }
+}
+
+/* EQ 滑动动画 */
+.eq-slide-enter-active,
+.eq-slide-leave-active {
+  transition: transform 0.3s ease;
+}
+.eq-slide-enter-from {
+  transform: translateX(100%);
+}
+.eq-slide-leave-to {
+  transform: translateX(100%);
 }
 </style>
