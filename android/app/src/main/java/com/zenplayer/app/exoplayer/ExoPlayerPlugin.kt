@@ -27,6 +27,17 @@ class ExoPlayerPlugin : Plugin() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var progressRunnable: Runnable? = null
     private var isProgressUpdating = false
+    private var pendingEndedEvent = false // 标记是否有待处理的结束事件
+    
+    // 下一首歌曲信息 - 用于息屏时原生层自动切歌
+    private data class NextTrackInfo(
+        val url: String,
+        val id: String,
+        val title: String,
+        val artist: String,
+        val cover: String?
+    )
+    private var nextTrack: NextTrackInfo? = null
 
     override fun load() {
         super.load()
@@ -56,10 +67,9 @@ class ExoPlayerPlugin : Plugin() {
                 notifyStateChange()
                 // 检测播放结束（STATE_ENDED = 4）
                 if (playbackState == Player.STATE_ENDED) {
-                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: 歌曲播放结束，触发 notifyListeners(onEnded)")
-                    val data = JSObject()
-                    data.put("event", "ended")
-                    notifyListeners("onEnded", data)
+                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: 歌曲播放结束，开始重试机制发送 onEnded 事件")
+                    // 使用重试机制确保息屏时 WebView 能收到事件
+                    sendEndedEventWithRetry(0)
                 }
             }
 
@@ -97,6 +107,90 @@ class ExoPlayerPlugin : Plugin() {
             data.put("duration", player.duration.coerceAtLeast(0))
             data.put("mediaId", player.currentMediaItem?.mediaId ?: "")
             notifyListeners("onStateChange", data)
+        }
+    }
+
+    /**
+     * 带重试机制的 onEnded 事件发送
+     * 息屏时 WebView 的 JS 引擎可能被挂起，需要多次发送确保能收到
+     * 如果重试都失败，则原生层直接播放下一首
+     */
+    private fun sendEndedEventWithRetry(retryCount: Int) {
+        val maxRetries = 3
+        val retryDelay = 300L // 300ms 间隔
+        
+        // 标记有待处理的结束事件
+        pendingEndedEvent = true
+        
+        // 发送事件
+        val data = JSObject()
+        data.put("event", "ended")
+        data.put("retryCount", retryCount)
+        notifyListeners("onEnded", data)
+        android.util.Log.e("ExoPlayerPlugin", "DEBUG: 发送 onEnded 事件 (第 ${retryCount + 1} 次)")
+        
+        // 如果还没到最大重试次数，安排下一次重试
+        if (retryCount < maxRetries - 1) {
+            mainHandler.postDelayed({
+                // 检查是否还需要重试（如果已经开始播放新歌曲，则不需要）
+                controller?.let { player ->
+                    // 如果仍然处于 ENDED 状态且没有在播放，继续重试
+                    if (pendingEndedEvent && !player.isPlaying && player.playbackState == Player.STATE_ENDED) {
+                        sendEndedEventWithRetry(retryCount + 1)
+                    } else {
+                        android.util.Log.d("ExoPlayerPlugin", "DEBUG: 停止重试，播放器状态已改变或已开始播放")
+                        pendingEndedEvent = false
+                    }
+                }
+            }, retryDelay)
+        } else {
+            // 已达到最大重试次数，WebView 无响应，尝试原生层自动切歌
+            android.util.Log.e("ExoPlayerPlugin", "DEBUG: WebView 无响应，尝试原生层自动切歌")
+            pendingEndedEvent = false
+            playNextTrackNatively()
+        }
+    }
+    
+    /**
+     * 原生层直接播放下一首歌曲
+     * 当 WebView 无法响应时（如息屏）使用
+     */
+    private fun playNextTrackNatively() {
+        val next = nextTrack
+        if (next == null) {
+            android.util.Log.w("ExoPlayerPlugin", "没有预设的下一首歌曲")
+            return
+        }
+        
+        android.util.Log.d("ExoPlayerPlugin", "原生层自动播放下一首: ${next.title}")
+        
+        controller?.let { player ->
+            val metadata = MediaMetadata.Builder()
+                .setTitle(next.title)
+                .setArtist(next.artist)
+                .apply {
+                    next.cover?.let { setArtworkUri(android.net.Uri.parse(it)) }
+                }
+                .build()
+
+            val mediaItem = MediaItem.Builder()
+                .setUri(next.url)
+                .setMediaId(next.id)
+                .setMediaMetadata(metadata)
+                .build()
+
+            player.setMediaItem(mediaItem)
+            player.prepare()
+            player.play()
+            
+            // 清空已使用的下一首信息
+            nextTrack = null
+            
+            // 通知前端（如果能收到的话）当前播放的歌曲变了
+            val changeData = JSObject()
+            changeData.put("mediaId", next.id)
+            changeData.put("nativeAutoNext", true)
+            notifyListeners("onTrackChange", changeData)
         }
     }
 
@@ -141,15 +235,34 @@ class ExoPlayerPlugin : Plugin() {
             return
         }
 
-        // 确保服务以前台模式运行
-        val serviceIntent = android.content.Intent(ctx, ExoPlayerService::class.java)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            ctx.startForegroundService(serviceIntent)
+        // 只在服务未连接时启动服务
+        // 如果 controller 已连接，说明服务已经在运行，不需要重新启动
+        if (controller == null) {
+            val serviceIntent = android.content.Intent(ctx, ExoPlayerService::class.java)
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    ctx.startForegroundService(serviceIntent)
+                } else {
+                    ctx.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                // Android 12+ 后台启动前台服务限制
+                android.util.Log.w("ExoPlayerPlugin", "无法启动前台服务: ${e.message}")
+                // 如果服务尚未运行且无法启动，尝试普通启动
+                try {
+                    ctx.startService(serviceIntent)
+                } catch (e2: Exception) {
+                    android.util.Log.e("ExoPlayerPlugin", "服务启动失败: ${e2.message}")
+                }
+            }
         } else {
-            ctx.startService(serviceIntent)
+            android.util.Log.d("ExoPlayerPlugin", "服务已连接，跳过启动")
         }
 
-        mainHandler.post {
+    mainHandler.post {
+            // 新歌曲开始播放，取消之前的 onEnded 重试
+            pendingEndedEvent = false
+            
             controller?.let { player ->
                 val metadata = MediaMetadata.Builder()
                     .setTitle(title)
@@ -165,12 +278,57 @@ class ExoPlayerPlugin : Plugin() {
                     .setMediaMetadata(metadata)
                     .build()
 
-                player.setMediaItem(mediaItem)
+                // 如果有下一首歌曲信息，使用 setMediaItems 添加两首歌曲
+                // 这样锁屏控制会显示下一首按钮
+                val next = nextTrack
+                if (next != null) {
+                    val nextMetadata = MediaMetadata.Builder()
+                        .setTitle(next.title)
+                        .setArtist(next.artist)
+                        .apply {
+                            next.cover?.let { setArtworkUri(android.net.Uri.parse(it)) }
+                        }
+                        .build()
+                    
+                    val nextMediaItem = MediaItem.Builder()
+                        .setUri(next.url)
+                        .setMediaId(next.id)
+                        .setMediaMetadata(nextMetadata)
+                        .build()
+                    
+                    player.setMediaItems(listOf(mediaItem, nextMediaItem), 0, 0)
+                } else {
+                    player.setMediaItem(mediaItem)
+                }
+                
                 player.prepare()
                 player.play()
                 
                 call.resolve(JSObject().put("success", true))
             } ?: call.reject("Player not ready")
+        }
+    }
+
+    /**
+     * 设置下一首歌曲信息
+     * 前端在播放时调用此方法预设下一首，用于息屏时原生层自动切歌
+     */
+    @PluginMethod
+    fun setNextTrack(call: PluginCall) {
+        val url = call.getString("url")
+        val id = call.getString("id")
+        val title = call.getString("title") ?: "Unknown"
+        val artist = call.getString("artist") ?: "Unknown"
+        val cover = call.getString("cover")
+        
+        if (url != null && id != null) {
+            nextTrack = NextTrackInfo(url, id, title, artist, cover)
+            android.util.Log.d("ExoPlayerPlugin", "已设置下一首: $title")
+            call.resolve(JSObject().put("success", true))
+        } else {
+            // 清空下一首信息
+            nextTrack = null
+            call.resolve(JSObject().put("success", true).put("cleared", true))
         }
     }
 
@@ -412,6 +570,40 @@ class ExoPlayerPlugin : Plugin() {
         val strength = call.getInt("strength") ?: 0
         mainHandler.post {
             ExoPlayerService.setVirtualizer(strength)
+            call.resolve(JSObject().put("success", true))
+        }
+    }
+
+    // ========== 缓存管理 ==========
+
+    @PluginMethod
+    fun getCacheStats(call: PluginCall) {
+        mainHandler.post {
+            val (size, count) = ExoPlayerService.getCacheStats()
+            val result = JSObject()
+            result.put("sizeBytes", size)
+            result.put("sizeMB", size / 1024 / 1024)
+            result.put("count", count)
+            call.resolve(result)
+        }
+    }
+
+    @PluginMethod
+    fun isCached(call: PluginCall) {
+        val mediaId = call.getString("mediaId") ?: run {
+            call.reject("mediaId is required")
+            return
+        }
+        mainHandler.post {
+            val cached = ExoPlayerService.isCached(mediaId)
+            call.resolve(JSObject().put("cached", cached))
+        }
+    }
+
+    @PluginMethod
+    fun clearCache(call: PluginCall) {
+        mainHandler.post {
+            ExoPlayerService.clearCache()
             call.resolve(JSObject().put("success", true))
         }
     }

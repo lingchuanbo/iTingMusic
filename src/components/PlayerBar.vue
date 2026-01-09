@@ -122,6 +122,119 @@ function updateProgressFromEvent(e: TouchEvent | MouseEvent) {
 }
 
 // -------------------------------------------------------------
+// Dynamic Background Color (从专辑封面提取主色调)
+// -------------------------------------------------------------
+const dominantColor = ref({ r: 88, g: 28, b: 135 }) // 默认紫色
+const colorCache = new Map<string, { r: number, g: number, b: number }>()
+
+// 从图片提取主色调
+function extractDominantColor(imageUrl: string) {
+  // 检查缓存
+  const cached = colorCache.get(imageUrl)
+  if (cached) {
+    dominantColor.value = cached
+    return
+  }
+  
+  const img = new Image()
+  img.crossOrigin = 'Anonymous'
+  
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      
+      // 缩小到很小的尺寸提取平均颜色
+      canvas.width = 20
+      canvas.height = 20
+      ctx.drawImage(img, 0, 0, 20, 20)
+      
+      const imageData = ctx.getImageData(0, 0, 20, 20)
+      const data = imageData.data
+      
+      let r = 0, g = 0, b = 0, count = 0
+      
+      // 计算平均颜色，排除太暗和太亮的像素
+      for (let i = 0; i < data.length; i += 4) {
+        const pr = data[i]
+        const pg = data[i + 1]
+        const pb = data[i + 2]
+        const brightness = (pr + pg + pb) / 3
+        
+        // 排除太暗（<30）和太亮（>225）的像素
+        if (brightness >= 30 && brightness <= 225) {
+          r += pr
+          g += pg
+          b += pb
+          count++
+        }
+      }
+      
+      if (count > 0) {
+        const newColor = {
+          r: Math.round(r / count),
+          g: Math.round(g / count),
+          b: Math.round(b / count)
+        }
+        // 缓存颜色
+        colorCache.set(imageUrl, newColor)
+        dominantColor.value = newColor
+      }
+    } catch (e) {
+      // 跨域错误等，使用默认颜色
+      console.warn('Failed to extract color:', e)
+    }
+  }
+  
+  img.onerror = () => {
+    // 加载失败，使用默认颜色
+    dominantColor.value = { r: 88, g: 28, b: 135 }
+  }
+  
+  img.src = imageUrl
+}
+
+// 当歌曲切换时提取颜色并检查缓存状态
+watch(() => store.currentTrack, async (newTrack, oldTrack) => {
+  // 只有当歌曲真正变化时才更新
+  if (newTrack?.id !== oldTrack?.id) {
+    // 提取封面颜色
+    if (newTrack?.cover) {
+      extractDominantColor(newTrack.cover)
+    } else {
+      // 没有封面时使用默认紫色
+      dominantColor.value = { r: 88, g: 28, b: 135 }
+    }
+    
+    // 检查缓存状态 (使用前端缓存追踪)
+    store.checkAndSetCached()
+  }
+}, { immediate: true, deep: false })
+
+// 动态背景样式
+const dynamicBackgroundStyle = computed(() => {
+  const { r, g, b } = dominantColor.value
+  const progress = dragProgress.value
+  
+  if (progress < 0.1) {
+    // 收起状态 - 使用固定深色背景
+    return {
+      transition: 'background 0.8s ease-out'
+    }
+  }
+  
+  // 展开状态 - 使用渐变背景
+  return {
+    background: `linear-gradient(to bottom, 
+      rgba(${r}, ${g}, ${b}, 0.6) 0%, 
+      rgba(${Math.round(r * 0.3)}, ${Math.round(g * 0.3)}, ${Math.round(b * 0.3)}, 0.9) 40%, 
+      rgba(24, 24, 27, 1) 100%)`,
+    transition: 'background 0.8s ease-out'
+  }
+})
+
+// -------------------------------------------------------------
 // Animation & Gesture State
 // -------------------------------------------------------------
 // 窗口尺寸 (用于计算)
@@ -189,13 +302,27 @@ const containerStyle = computed(() => {
   // When expanded (dragProgress > 0.5), immediately go fullscreen
   const currentLeft = isDesktop && dragProgress.value < 0.5 ? (5 * 16) : 0
 
+  // Mobile: 计算动态 bottom 值 - 展开时从导航栏上方过渡到 0
+  // 收起时 bottom = 3.5rem (56px) + safe-area，展开时 bottom = 0
+  // 需要使用 CSS calc 来包含安全区域，因为 safe-area 只能在 CSS 中获取
+  const mobileNavHeight = isDesktop ? 0 : 56 // 3.5rem = 56px
+  const currentBottomBase = mobileNavHeight * (1 - dragProgress.value)
+  
+  // 当收起或正在展开时，需要包含安全区域
+  // 展开完成时(dragProgress >= 1)，不需要安全区域
+  const needsSafeArea = !isDesktop && dragProgress.value < 1
+  const bottomValue = needsSafeArea
+    ? `calc(${currentBottomBase}px + env(safe-area-inset-bottom, 0px) * ${1 - dragProgress.value})`
+    : `${currentBottomBase}px`
+
   const style: any = {
     height: `${currentHeight}px`,
     left: `${currentLeft}px`,
+    bottom: bottomValue,
     borderTopLeftRadius: `${borderRadius}px`,
     borderTopRightRadius: `${borderRadius}px`,
-    willChange: 'height, left, border-radius',
-    transform: 'translateZ(0)' 
+    willChange: 'height, left, bottom, border-radius',
+    transform: 'translateZ(0)'
   }
 
   if (isDragging.value) {
@@ -213,9 +340,9 @@ const containerStyle = computed(() => {
 const floatingCoverStyle = computed(() => {
   const p = dragProgress.value
   
-  // Size: 40px -> 300px (增大封面)
+  // Size: 40px -> 280px (封面大小)
   const startSize = 40
-  const endSize = 300 
+  const endSize = 300
   const currentSize = startSize + p * (endSize - startSize)
   
   // Position Left: 16px -> Center
@@ -223,9 +350,9 @@ const floatingCoverStyle = computed(() => {
   const endLeft = (screenWidth.value - endSize) / 2
   const currentLeft = startLeft + p * (endLeft - startLeft)
 
-  // Position Bottom: 12px -> Calculated endBottom (调整到 52%)
+  // Position Bottom: 12px -> Calculated endBottom (封面位置 50%)
   const startBottom = 12
-  const endBottom = screenHeight.value * 0.52
+  const endBottom = screenHeight.value * 0.50
   const currentBottom = startBottom + p * (endBottom - startBottom)
 
   // Border Radius: 50% (of 40px = 20px) -> 12px
@@ -265,6 +392,7 @@ const expandedControlStyle = computed(() => {
   return { 
     opacity: dragProgress.value < 0.1 ? 0 : opacity, 
     pointerEvents: opacity < 0.9 ? 'none' : 'auto',
+    zIndex: 30, // 确保控件在封面之上可点击
     transition: isDragging.value ? 'none' : 'opacity 0.3s ease'
   } as any
 })
@@ -508,9 +636,10 @@ function clearPlaylist() {
     <div
       v-if="!isSelectMode && !isModalOpen"
       :class="[
-        'fixed left-0 right-0 z-50 backdrop-blur-xl border-t border-white/10 bottom-0 overflow-hidden mobile-player-bar bg-zinc-900/98'
+        'fixed left-0 right-0 backdrop-blur-xl border-t border-white/10 bottom-0 overflow-hidden mobile-player-bar',
+        sheetOffset > 0 ? '' : 'bg-zinc-900/98'
       ]"
-      :style="containerStyle"
+      :style="{ ...containerStyle, ...dynamicBackgroundStyle, zIndex: sheetOffset > 0 ? 100 : 50 }"
       @touchstart="handleTouchStart"
       @touchmove="handleTouchMove"
       @touchend="handleTouchEnd"
@@ -547,9 +676,14 @@ function clearPlaylist() {
         <!-- 进度条（顶部渐变色细线） -->
         <div class="h-[2px] bg-white/5 relative z-10 flex-shrink-0">
           <template v-if="store.currentTrack">
-            <!-- 播放进度（渐变色） -->
+            <!-- 播放进度（根据缓存状态变色） -->
             <div
-              class="absolute h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-100"
+              :class="[
+                'absolute h-full transition-all duration-100',
+                store.isCached 
+                  ? 'bg-gradient-to-r from-green-400 to-emerald-500' 
+                  : 'bg-gradient-to-r from-purple-500 to-pink-500'
+              ]"
               :style="{ width: `${store.progress}%` }"
             ></div>
           </template>
@@ -640,15 +774,17 @@ function clearPlaylist() {
     <!--  3. Expanded Player Controls (Fades In)          -->
     <!-- ------------------------------------------------ -->
     <div 
-        class="absolute inset-0 pt-[50vh] px-6 flex flex-col items-center justify-start"
+        class="absolute inset-0 pt-[50vh] px-6 pb-[calc(2rem+env(safe-area-inset-bottom,20px))] flex flex-col items-center justify-start"
         :style="expandedControlStyle"
     >
         <!-- Song Info -->
-        <h2 class="text-2xl text-white font-bold mb-1.5 text-center max-w-full truncate px-4 drop-shadow-[0_2px_8px_rgba(0,0,0,0.3)]">{{ store.currentTrack?.title }}</h2>
-        <p class="text-white/50 text-sm mb-3 text-center">{{ store.currentTrack?.artist || '未知艺人' }}</p>
+        <div class="flex items-center justify-center gap-2 mt-5">
+          <h2 class="text-2xl text-white font-bold text-center max-w-full truncate px-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.3)]">{{ store.currentTrack?.title }}</h2>
+        </div>
+        <p class="text-white/50 text-sm mb-4 text-center">{{ store.currentTrack?.artist || '未知艺人' }}</p>
         
-        <!-- Action Buttons Row (紧贴歌曲信息) -->
-        <div class="flex items-center justify-center gap-5 mb-5">
+        <!-- Action Buttons Row -->
+        <div class="flex items-center justify-center gap-5 mb-4">
           <!-- Favorite Button -->
           <button 
             @click.stop="toggleFavorite"
@@ -706,7 +842,7 @@ function clearPlaylist() {
         
         <!-- Lyrics Display (2 lines) - 点击进入歌词页 -->
         <div 
-          class="w-full max-w-sm h-14 flex flex-col items-center justify-center mb-4 overflow-hidden cursor-pointer rounded-xl hover:bg-white/5 active:bg-white/10 transition-colors"
+          class="w-full max-w-sm h-12 flex flex-col items-center justify-center mb-4 overflow-hidden cursor-pointer rounded-xl transition-colors relative z-50"
           @click.stop="store.toggleLyrics()"
         >
           <p class="text-white/90 text-base font-medium text-center truncate w-full transition-all duration-300">
@@ -730,13 +866,27 @@ function clearPlaylist() {
           @mouseleave="handleProgressEnd"
         >
           <div class="w-full h-1 bg-white/15 rounded-full relative">
-            <div class="h-full bg-gradient-to-r from-purple-400 via-purple-500 to-pink-500 rounded-full transition-all" :style="{ width: `${store.progress}%` }"></div>
-            <div class="absolute top-1/2 w-3.5 h-3.5 bg-white rounded-full shadow-[0_0_10px_rgba(139,92,246,0.4)] transform -translate-y-1/2 -translate-x-1/2 transition-transform hover:scale-110" :style="{ left: `${store.progress}%` }"></div>
+            <div 
+              :class="[
+                'h-full rounded-full transition-all',
+                store.isCached 
+                  ? 'bg-gradient-to-r from-green-400 via-green-500 to-emerald-500' 
+                  : 'bg-gradient-to-r from-purple-400 via-purple-500 to-pink-500'
+              ]" 
+              :style="{ width: `${store.progress}%` }"
+            ></div>
+            <div 
+              :class="[
+                'absolute top-1/2 w-3.5 h-3.5 rounded-full transform -translate-y-1/2 -translate-x-1/2 transition-transform hover:scale-110',
+                store.isCached ? 'bg-green-400 shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-white shadow-[0_0_10px_rgba(139,92,246,0.4)]'
+              ]" 
+              :style="{ left: `${store.progress}%` }"
+            ></div>
           </div>
         </div>
         
         <!-- Time Display -->
-        <div class="w-full max-w-sm flex justify-between text-white/40 text-xs mb-5 font-medium">
+        <div class="w-full max-w-sm flex justify-between text-white/40 text-xs mb-4 font-medium">
           <span>{{ formatTime(store.currentTime) }}</span>
           <span>{{ formatTime(store.duration) }}</span>
         </div>
@@ -749,21 +899,22 @@ function clearPlaylist() {
             class="w-11 h-11 rounded-full bg-white/8 hover:bg-white/12 flex items-center justify-center text-white/50 hover:text-white/80 transition-all active:scale-90"
             :title="playModeText"
           >
-            <!-- Sequence -->
+            <!-- Sequence: 向右箭头表示顺序 -->
             <svg v-if="store.playMode === 'sequence'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
             </svg>
-            <!-- Loop -->
+            <!-- Loop: 循环箭头 -->
             <svg v-else-if="store.playMode === 'loop'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
-            <!-- Single -->
-            <svg v-else-if="store.playMode === 'single'" class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0020 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 004 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+            <!-- Single: 数字1 + 循环符号 -->
+            <svg v-else-if="store.playMode === 'single'" class="w-5 h-5" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              <text x="12" y="14" text-anchor="middle" font-size="8" font-weight="bold" fill="currentColor">1</text>
             </svg>
-            <!-- Shuffle -->
+            <!-- Shuffle: 交叉箭头 -->
             <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3l-3 3"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
             </svg>
           </button>
 
@@ -793,7 +944,7 @@ function clearPlaylist() {
           <!-- Playlist Button (Right) -->
           <button 
             @click.stop="togglePlaylist"
-            class="w-11 h-11 rounded-full bg-white/8 hover:bg-white/12 flex items-center justify-center text-white/50 hover:text-white/80 transition-all active:scale-90"
+            class="w-11 h-11 rounded-full bg-white/8 hover:bg-white/12 flex items-center justify-center text-white/50 hover:text-white/80 transition-all active:scale-90 relative z-50"
             title="播放列表"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -812,7 +963,7 @@ function clearPlaylist() {
   <Transition name="playlist-popup">
     <div 
       v-if="showPlaylist && !isSelectMode && !isModalOpen"
-      class="fixed left-0 right-0 z-[70] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl"
+      class="fixed left-0 right-0 z-[150] bg-neutral-900 border-t border-white/10 rounded-t-2xl overflow-hidden shadow-2xl"
       :style="{ 
         bottom: `calc(64px + env(safe-area-inset-bottom, 0px) + (${screenWidth < 768 ? '3.5rem' : '0px'}))`,
         transform: (isDraggingPlaylist || playlistDragY > 0) ? `translateY(${playlistDragY}px)` : '',
@@ -906,7 +1057,7 @@ function clearPlaylist() {
   <Transition name="fade">
     <div 
       v-if="showPlaylist && !isSelectMode && !isModalOpen"
-      class="fixed inset-0 z-[69] bg-black/40"
+      class="fixed inset-0 z-[140] bg-black/40"
       @click="showPlaylist = false"
     ></div>
   </Transition>
@@ -952,14 +1103,14 @@ function clearPlaylist() {
   }
 }
 
-/* 移动端播放栏定位 - 在底部导航栏上方 */
+/* 移动端播放栏定位 - bottom 值由 containerStyle 动态计算 */
 .mobile-player-bar {
-  bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  /* bottom 值由 containerStyle 动态设置，不需要在这里声明 */
 }
 
 @media (min-width: 768px) {
   .mobile-player-bar {
-    bottom: 0;
+    /* 桌面端由 containerStyle 处理 */
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 }

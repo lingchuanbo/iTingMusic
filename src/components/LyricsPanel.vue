@@ -449,7 +449,7 @@ watch(
   <Transition name="slide">
     <div 
       v-if="store.showLyrics && store.currentTrack"
-      class="fixed inset-0 z-50 flex flex-col overflow-hidden"
+      class="fixed inset-0 z-[200] flex flex-col overflow-hidden"
     >
       <!-- 动态模糊背景 -->
       <div class="absolute inset-0 z-0">
@@ -674,7 +674,7 @@ watch(
   <Transition name="slide-up">
     <div 
       v-if="showLyricsSettings" 
-      class="fixed inset-0 z-[60] bg-black/60 flex items-end justify-center"
+      class="fixed inset-0 z-[210] bg-black/60 flex items-end justify-center"
       @click="showLyricsSettings = false"
     >
       <div class="w-full max-w-md bg-zinc-900 rounded-t-2xl p-4 pb-8 max-h-[80vh] overflow-y-auto" @click.stop>

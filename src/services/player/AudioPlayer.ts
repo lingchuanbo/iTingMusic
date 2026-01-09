@@ -151,6 +151,56 @@ class AudioPlayer {
   }
 
   /**
+   * 预加载下一首歌曲信息到原生层
+   * 用于息屏时原生层自动切歌
+   */
+  private async preloadNextTrackForNative(store: ReturnType<typeof usePlayerStore>) {
+    if (!this.useExoPlayer) return
+
+    const { playlist, currentIndex, playMode } = store
+    if (playlist.length === 0) return
+
+    // 计算下一首索引
+    let nextIndex: number
+    if (playMode === 'shuffle') {
+      nextIndex = Math.floor(Math.random() * playlist.length)
+    } else if (playMode === 'single') {
+      // 单曲循环，下一首还是当前曲
+      nextIndex = currentIndex
+    } else {
+      // sequence 或 loop
+      nextIndex = (currentIndex + 1) % playlist.length
+    }
+
+    const nextTrack = playlist[nextIndex] as OnlineTrack
+    if (!nextTrack) return
+
+    try {
+      // 获取下一首的实际 URL
+      let nextUrl: string | null = null
+      if (nextTrack._platform && nextTrack._songId) {
+        const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
+        nextUrl = await getActualMusicUrl(nextTrack._platform, nextTrack._songId)
+      } else {
+        nextUrl = nextTrack.url
+      }
+
+      if (nextUrl) {
+        await nativeAudioPlayer.setNextTrack({
+          url: nextUrl,
+          id: nextTrack.id,
+          title: nextTrack.title,
+          artist: nextTrack.artist,
+          cover: nextTrack.cover
+        })
+        console.log('AudioPlayer: 已预加载下一首到原生层:', nextTrack.title)
+      }
+    } catch (e) {
+      console.warn('预加载下一首失败:', e)
+    }
+  }
+
+  /**
    * 播放音频，优先使用缓存
    */
   async play(url: string, track?: Track) {
@@ -229,6 +279,9 @@ class AudioPlayer {
 
         store.isPlaying = true
         console.log('AudioPlayer: ExoPlayer 播放开始')
+
+        // 预加载下一首歌曲信息，用于息屏时原生层自动切歌
+        this.preloadNextTrackForNative(store)
       } catch (e) {
         console.error('AudioPlayer: ExoPlayer 播放失败', e)
         this.handlePlayError(store)

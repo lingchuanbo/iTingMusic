@@ -48,6 +48,15 @@ interface ExoPlayerPlugin {
     prev(): Promise<{ success: boolean }>
     setPlayMode(options: { mode: string }): Promise<{ success: boolean }>
 
+    // 背景播放支持 - 设置下一首歌曲信息，用于息屏时原生自动切歌
+    setNextTrack(options: {
+        url: string
+        id: string
+        title?: string
+        artist?: string
+        cover?: string
+    }): Promise<{ success: boolean }>
+
     // 均衡器
     getAudioSessionId(): Promise<{ sessionId: number }>
     setEqualizerEnabled(options: { enabled: boolean }): Promise<{ success: boolean }>
@@ -56,6 +65,11 @@ interface ExoPlayerPlugin {
     setBassBoost(options: { strength: number }): Promise<{ success: boolean }>
     setVirtualizer(options: { strength: number }): Promise<{ success: boolean }>
     checkListeners(): Promise<{ listeners: string[] }>
+
+    // 缓存管理
+    getCacheStats(): Promise<{ sizeBytes: number; sizeMB: number; count: number }>
+    isCached(options: { mediaId: string }): Promise<{ cached: boolean }>
+    clearCache(): Promise<{ success: boolean }>
 
     // 事件监听
     addListener(
@@ -161,6 +175,11 @@ class NativeAudioPlayer {
                     store.setDuration(data.duration / 1000)
                     const buffered = (data.bufferedPosition / data.duration) * 100
                     store.setBuffered(buffered)
+
+                    // 当缓冲完成时，标记为已缓存并保存到 localStorage
+                    if (data.bufferedPosition >= data.duration && !store.isCached) {
+                        store.markCurrentAsCached()
+                    }
                 }
             })
             this.listeners.push(progressListener)
@@ -168,13 +187,16 @@ class NativeAudioPlayer {
 
             // 4. 歌曲切换监听
             console.log('NativeAudioPlayer: 正在注册 onTrackChange...')
-            const trackListener = await NativeExoPlayer.addListener('onTrackChange', (data) => {
+            const trackListener = await NativeExoPlayer.addListener('onTrackChange', async (data) => {
                 console.log('NativeAudioPlayer: [EVENT] onTrackChange', data.mediaId)
                 const store = usePlayerStore()
                 const index = store.playlist.findIndex(t => t.id === data.mediaId)
                 if (index >= 0 && index !== store.currentIndex) {
                     store.currentIndex = index
                 }
+
+                // 检查新歌曲是否已缓存 (使用前端缓存追踪)
+                store.checkAndSetCached()
             })
             this.listeners.push(trackListener)
             console.log('NativeAudioPlayer: onTrackChange 注册成功')
@@ -228,6 +250,7 @@ class NativeAudioPlayer {
                 artist: track?.artist || 'Unknown',
                 cover: track?.cover
             })
+            // 缓存状态由 store.checkAndSetCached() 在播放入口处检查
         } catch (e) {
             console.error('NativeAudioPlayer: play 失败', e)
             throw e
@@ -253,6 +276,7 @@ class NativeAudioPlayer {
                 tracks: trackItems,
                 startIndex
             })
+            // 缓存状态由 store.checkAndSetCached() 在播放入口处检查
         } catch (e) {
             console.error('NativeAudioPlayer: setPlaylistAndPlay 失败', e)
             throw e
@@ -398,6 +422,43 @@ class NativeAudioPlayer {
      */
     async setVirtualizer(strength: number): Promise<void> {
         await NativeExoPlayer.setVirtualizer({ strength })
+    }
+
+    // ========== 缓存管理 ==========
+
+    /**
+     * 获取缓存统计信息
+     */
+    async getCacheStats(): Promise<{ sizeBytes: number; sizeMB: number; count: number }> {
+        return await NativeExoPlayer.getCacheStats()
+    }
+
+    /**
+     * 检查某首歌是否已缓存（传入 URL 作为缓存 key）
+     */
+    async isCached(cacheKey: string): Promise<boolean> {
+        const result = await NativeExoPlayer.isCached({ mediaId: cacheKey })
+        return result.cached
+    }
+
+    /**
+     * 清除所有音频缓存
+     */
+    async clearCache(): Promise<void> {
+        await NativeExoPlayer.clearCache()
+    }
+
+    /**
+     * 设置下一首歌曲信息（用于息屏时原生自动切歌）
+     */
+    async setNextTrack(options: {
+        url: string
+        id: string
+        title?: string
+        artist?: string
+        cover?: string
+    }): Promise<void> {
+        await NativeExoPlayer.setNextTrack(options)
     }
 
     /**

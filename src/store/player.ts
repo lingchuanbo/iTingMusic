@@ -4,8 +4,31 @@ import type { Track, PlayMode } from '@/types'
 import { audioCache } from '@/services/cache/AudioCache'
 
 const STORAGE_KEY = 'zen_player_data'
+const CACHED_URLS_KEY = 'zen_cached_urls'
 
-// 从 localStorage 加载数据
+// 从 localStorage 加载缓存 URL 列表
+function loadCachedUrls(): Set<string> {
+  try {
+    const data = localStorage.getItem(CACHED_URLS_KEY)
+    if (data) {
+      return new Set(JSON.parse(data))
+    }
+  } catch (e) {
+    console.error('加载缓存URL列表失败:', e)
+  }
+  return new Set()
+}
+
+// 保存缓存 URL 列表
+function saveCachedUrls(urls: Set<string>) {
+  try {
+    // 限制最多保存 500 个 URL
+    const arr = Array.from(urls).slice(-500)
+    localStorage.setItem(CACHED_URLS_KEY, JSON.stringify(arr))
+  } catch (e) {
+    console.error('保存缓存URL列表失败:', e)
+  }
+}
 function loadFromStorage() {
   try {
     const data = localStorage.getItem(STORAGE_KEY)
@@ -42,6 +65,9 @@ export const usePlayerStore = defineStore('player', () => {
   const playMode = ref<PlayMode>(saved.playMode as PlayMode)
   const showLyrics = ref(false)
   const backgroundPlayEnabled = ref(saved.backgroundPlayEnabled)
+
+  // 缓存 URL 记录 (前端追踪已缓存的歌曲)
+  const cachedUrls = loadCachedUrls()
 
   // 计算属性
   const currentTrack = computed(() =>
@@ -103,6 +129,8 @@ export const usePlayerStore = defineStore('player', () => {
       duration.value = 0
       // 更新索引
       currentIndex.value = index
+      // 立即检查缓存状态
+      checkAndSetCached()
       // 增加版本号强制触发播放（即使是同一首歌）
       playVersion.value++
       isPlaying.value = true
@@ -118,12 +146,14 @@ export const usePlayerStore = defineStore('player', () => {
     // 重置播放时间
     currentTime.value = 0
     duration.value = 0
-    
+
     if (playMode.value === 'shuffle') {
       currentIndex.value = Math.floor(Math.random() * playlist.value.length)
     } else {
       currentIndex.value = (currentIndex.value + 1) % playlist.value.length
     }
+    // 检查缓存状态
+    checkAndSetCached()
     // 增加版本号触发播放
     playVersion.value++
     isPlaying.value = true
@@ -134,10 +164,12 @@ export const usePlayerStore = defineStore('player', () => {
     // 重置播放时间
     currentTime.value = 0
     duration.value = 0
-    
+
     currentIndex.value = currentIndex.value <= 0
       ? playlist.value.length - 1
       : currentIndex.value - 1
+    // 检查缓存状态
+    checkAndSetCached()
     // 增加版本号触发播放
     playVersion.value++
     isPlaying.value = true
@@ -157,6 +189,26 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setCached(cached: boolean) {
     isCached.value = cached
+  }
+
+  // 标记当前歌曲为已缓存
+  function markCurrentAsCached() {
+    const track = currentTrack.value
+    if (track?.url) {
+      cachedUrls.add(track.url)
+      saveCachedUrls(cachedUrls)
+      isCached.value = true
+    }
+  }
+
+  // 检查并设置当前歌曲的缓存状态
+  function checkAndSetCached() {
+    const track = currentTrack.value
+    if (track?.url) {
+      isCached.value = cachedUrls.has(track.url)
+    } else {
+      isCached.value = false
+    }
   }
 
   function setVolume(v: number) {
@@ -184,13 +236,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   function removeTrack(index: number) {
     if (index < 0 || index >= playlist.value.length) return
-    
+
     const track = playlist.value[index]
     // 删除该歌曲的缓存
     audioCache.delete(track.id)
-    
+
     playlist.value.splice(index, 1)
-    
+
     // 调整当前索引
     if (playlist.value.length === 0) {
       currentIndex.value = -1
@@ -214,6 +266,6 @@ export const usePlayerStore = defineStore('player', () => {
     playlist, currentIndex, playVersion, isPlaying, currentTime, duration, buffered, isCached, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
-    setCurrentTime, setDuration, setBuffered, setCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, removeTrack, toggleBackgroundPlay
+    setCurrentTime, setDuration, setBuffered, setCached, markCurrentAsCached, checkAndSetCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, removeTrack, toggleBackgroundPlay
   }
 })

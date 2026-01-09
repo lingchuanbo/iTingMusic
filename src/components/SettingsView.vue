@@ -80,6 +80,25 @@ function toggleSource(source: MusicSource) {
 const cacheStats = ref({ count: 0, totalSize: 0 })
 const cacheLoading = ref(false)
 
+// 缓存大小配置
+const CACHE_SIZE_KEY = 'audio_cache_max_size'
+const cacheSizeOptions = [
+  { value: 500, label: '500MB' },
+  { value: 1024, label: '1GB' },
+  { value: 2048, label: '2GB' },
+  { value: 5120, label: '5GB' },
+  { value: 10240, label: '10GB' }
+]
+const maxCacheSizeMB = ref<number>(
+  Number(localStorage.getItem(CACHE_SIZE_KEY)) || 2048
+)
+
+function setCacheSize(sizeMB: number) {
+  maxCacheSizeMB.value = sizeMB
+  localStorage.setItem(CACHE_SIZE_KEY, String(sizeMB))
+  // 注意：缓存大小设置在应用重启后生效
+}
+
 async function loadCacheStats() {
   cacheStats.value = await audioCache.getStats()
 }
@@ -606,6 +625,26 @@ function toggleSection(section: string) {
                 ]"
               ></span>
             </button>
+          </div>
+
+          <!-- 缓存大小限制 -->
+          <div>
+            <p class="text-white text-sm mb-2">缓存大小上限</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="opt in cacheSizeOptions"
+                :key="opt.value"
+                @click="setCacheSize(opt.value)"
+                :class="[
+                  'px-3 py-1.5 rounded-lg text-xs transition-all',
+                  maxCacheSizeMB === opt.value
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-white/10 text-white/60 hover:bg-white/15'
+                ]"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
           </div>
 
           <!-- 网络状态 -->

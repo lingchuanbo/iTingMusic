@@ -16,8 +16,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
 import com.zenplayer.app.MainActivity
 import com.zenplayer.app.R
+import java.io.File
 
 @UnstableApi
 class ExoPlayerService : MediaSessionService() {
@@ -30,6 +35,11 @@ class ExoPlayerService : MediaSessionService() {
     companion object {
         private const val CHANNEL_ID = "exoplayer_playback"
         private const val NOTIFICATION_ID = 2001
+        
+        // 音频缓存 - 2GB 限制，LRU 淘汰策略
+        private const val MAX_CACHE_SIZE = 2L * 1024 * 1024 * 1024 // 2GB
+        private var cache: SimpleCache? = null
+        private var databaseProvider: StandaloneDatabaseProvider? = null
 
         @Volatile
         var audioSessionId: Int = 0
@@ -39,6 +49,64 @@ class ExoPlayerService : MediaSessionService() {
         private var loudnessEnhancer: LoudnessEnhancer? = null
         private var virtualizer: android.media.audiofx.Virtualizer? = null
         private var equalizerEnabled = false
+        
+        /**
+         * 获取或创建缓存实例（单例模式）
+         */
+        @Synchronized
+        fun getCache(context: android.content.Context): SimpleCache {
+            if (cache == null) {
+                val cacheDir = File(context.cacheDir, "exoplayer_audio_cache")
+                if (!cacheDir.exists()) {
+                    cacheDir.mkdirs()
+                }
+                val evictor = LeastRecentlyUsedCacheEvictor(MAX_CACHE_SIZE)
+                databaseProvider = StandaloneDatabaseProvider(context)
+                cache = SimpleCache(cacheDir, evictor, databaseProvider!!)
+                android.util.Log.d("ExoPlayerService", "音频缓存初始化完成，最大容量: ${MAX_CACHE_SIZE / 1024 / 1024}MB")
+            }
+            return cache!!
+        }
+        
+        /**
+         * 获取缓存统计信息
+         */
+        fun getCacheStats(): Pair<Long, Int> {
+            val cacheInstance = cache ?: return Pair(0L, 0)
+            val keys = cacheInstance.keys
+            var totalSize = 0L
+            for (key in keys) {
+                val spans = cacheInstance.getCachedSpans(key)
+                for (span in spans) {
+                    totalSize += span.length
+                }
+            }
+            return Pair(totalSize, keys.size)
+        }
+        
+        /**
+         * 检查某首歌是否已缓存
+         * 注意：cacheKey 应该是 URL，因为 SimpleCache 使用 URL 作为 key
+         */
+        fun isCached(cacheKey: String): Boolean {
+            val cacheInstance = cache ?: return false
+            val isCached = cacheInstance.keys.contains(cacheKey)
+            android.util.Log.d("ExoPlayerService", "检查缓存: key=$cacheKey, cached=$isCached, 缓存keys数量=${cacheInstance.keys.size}")
+            return isCached
+        }
+        
+        /**
+         * 清除所有缓存
+         */
+        fun clearCache() {
+            cache?.let { c ->
+                val keys = c.keys.toList()
+                for (key in keys) {
+                    c.removeResource(key)
+                }
+                android.util.Log.d("ExoPlayerService", "缓存已清除")
+            }
+        }
 
         fun setEqualizerEnabled(enabled: Boolean) {
             equalizerEnabled = enabled
@@ -103,6 +171,24 @@ class ExoPlayerService : MediaSessionService() {
                 .setNotificationId(NOTIFICATION_ID)
                 .build()
         )
+    }
+
+    /**
+     * 覆盖通知更新方法，捕获 Android 12+ 后台启动前台服务的异常
+     * 这个异常在息屏切歌时会触发，但不影响实际功能
+     */
+    override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        try {
+            super.onUpdateNotification(session, startInForegroundRequired)
+        } catch (e: Exception) {
+            // 忽略 ForegroundServiceStartNotAllowedException
+            // 在 Android 12+ 后台时会触发，但服务仍在运行
+            if (e.javaClass.simpleName == "ForegroundServiceStartNotAllowedException") {
+                android.util.Log.d("ExoPlayerService", "忽略后台通知更新异常 (正常)")
+            } else {
+                android.util.Log.w("ExoPlayerService", "通知更新异常: ${e.message}")
+            }
+        }
     }
 
     override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
@@ -179,9 +265,21 @@ class ExoPlayerService : MediaSessionService() {
             }
             .build()
 
-        // 使用 OkHttp 数据源
-        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okHttpClient)
+        // 使用 OkHttp 数据源作为上游数据源
+        val okHttpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent("Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/91.0.4472.120 Mobile Safari/537.36")
+
+        // 初始化音频缓存
+        val audioCache = getCache(applicationContext)
+        android.util.Log.d("ExoPlayerService", "缓存已初始化，当前缓存歌曲数: ${audioCache.keys.size}")
+
+        // 使用 CacheDataSource 包装 OkHttp 数据源，实现透明缓存
+        // 首次播放时从网络下载并缓存，二次播放直接读取缓存
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(audioCache)
+            .setUpstreamDataSourceFactory(okHttpDataSourceFactory)
+            .setCacheWriteDataSinkFactory(null) // 使用默认写入
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR) // 缓存错误时回退到网络
 
         // 初始化 WifiLock 和 WakeLock 以防止息屏时 WiFi 进入休眠或 CPU 停止
         val wifiManager = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
@@ -203,7 +301,7 @@ class ExoPlayerService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .setMediaSourceFactory(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(this)
-                    .setDataSourceFactory(dataSourceFactory)
+                    .setDataSourceFactory(cacheDataSourceFactory) // 使用带缓存的数据源
             )
             .build()
             .also {

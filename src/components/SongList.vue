@@ -1,14 +1,51 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
 import { usePlaylistStore } from '@/store/playlist'
 import { setSelectMode, setModalOpen } from '@/store/ui'
 
 import { formatTime } from '@/utils/formatTime'
 import { trackStorage } from '@/services/TrackStorage'
+import { audioCache } from '@/services/cache/AudioCache'
 
 import CachedImage from '@/components/common/CachedImage.vue'
 import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
+
+// 缓存状态追踪
+const cachedSongIds = ref<Set<string>>(new Set())
+
+async function loadCachedStatus() {
+  const store = usePlayerStore()
+  const newCached = new Set<string>()
+  
+  if (Capacitor.isNativePlatform()) {
+    // Android: 使用原生缓存检查
+    const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
+    for (const track of store.playlist) {
+      if (track.id) {
+        try {
+          const cached = await nativeAudioPlayer.isCached(track.id)
+          if (cached) newCached.add(track.id)
+        } catch { /* ignore */ }
+      }
+    }
+  } else {
+    // Web: 使用 IndexedDB 缓存检查
+    for (const track of store.playlist) {
+      if (track.id && await audioCache.has(track.id)) {
+        newCached.add(track.id)
+      }
+    }
+  }
+  
+  cachedSongIds.value = newCached
+}
+
+// 组件挂载时加载缓存状态
+onMounted(() => {
+  loadCachedStatus()
+})
 
 type ViewMode = 'list' | 'grid' | 'compact'
 
@@ -391,7 +428,10 @@ function clearPlaylist() {
           </div>
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-white font-medium truncate">{{ track.title }}</p>
+          <p class="text-white font-medium truncate flex items-center gap-1.5">
+            <span v-if="cachedSongIds.has(track.id)" class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" title="已缓存"></span>
+            {{ track.title }}
+          </p>
           <p class="text-white/50 text-sm truncate">{{ track.artist }}</p>
         </div>
         <span class="text-white/40 text-sm hidden sm:inline">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
@@ -474,7 +514,10 @@ function clearPlaylist() {
             {{ index + 1 }}
           </div>
         </div>
-        <p class="text-white text-xs md:text-sm font-medium truncate">{{ track.title }}</p>
+        <p class="text-white text-xs md:text-sm font-medium truncate flex items-center gap-1">
+          <span v-if="cachedSongIds.has(track.id)" class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" title="已缓存"></span>
+          {{ track.title }}
+        </p>
         <p class="text-white/50 text-[10px] md:text-xs truncate">{{ track.artist }}</p>
       </div>
     </div>
@@ -507,7 +550,10 @@ function clearPlaylist() {
         <span v-if="!isSelectMode" class="w-6 text-white/30 text-xs text-right">{{ index + 1 }}</span>
         <span v-if="!isSelectMode && store.currentIndex === index && store.isPlaying" class="text-green-400 text-xs">▶</span>
         <span v-else-if="!isSelectMode" class="w-3"></span>
-        <span class="flex-1 text-white text-sm truncate">{{ track.title }}</span>
+        <span class="flex-1 text-white text-sm truncate flex items-center gap-1">
+          <span v-if="cachedSongIds.has(track.id)" class="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" title="已缓存"></span>
+          {{ track.title }}
+        </span>
         <span class="text-white/40 text-sm truncate max-w-32">{{ track.artist }}</span>
         <span class="text-white/30 text-xs w-10 text-right">{{ track.duration ? formatTime(track.duration) : '--:--' }}</span>
         <!-- 更多操作按钮（长按进入多选） -->
