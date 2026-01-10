@@ -67,9 +67,50 @@ class ExoPlayerPlugin : Plugin() {
                 notifyStateChange()
                 // 检测播放结束（STATE_ENDED = 4）
                 if (playbackState == Player.STATE_ENDED) {
-                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: 歌曲播放结束，开始重试机制发送 onEnded 事件")
-                    // 使用重试机制确保息屏时 WebView 能收到事件
-                    sendEndedEventWithRetry(0)
+                    // 检查是否是真正的播放结束，而不是息屏导致的假结束
+                    val player = controller
+                    if (player != null) {
+                        val duration = player.duration
+                        val position = player.currentPosition
+                        val progress = if (duration > 0) position.toFloat() / duration.toFloat() else 0f
+                        
+                        android.util.Log.e("ExoPlayerPlugin", "DEBUG: STATE_ENDED - position=$position, duration=$duration, progress=${(progress * 100).toInt()}%")
+                        
+                        // 只有当播放进度超过 95% 时才认为是真正的结束
+                        // 否则可能是息屏导致的网络中断或缓冲问题
+                        if (progress >= 0.95f || position >= duration - 1000) {
+                            android.util.Log.e("ExoPlayerPlugin", "DEBUG: 歌曲真正播放结束")
+                            
+                            // 检查是否有下一首在播放队列中
+                            // ExoPlayer 会自动切换，通过 onMediaItemTransition 事件通知前端
+                            if (player.hasNextMediaItem()) {
+                                android.util.Log.d("ExoPlayerPlugin", "DEBUG: ExoPlayer 队列有下一首，等待自动切换")
+                                // 不需要手动操作，ExoPlayer 会自动切换
+                                // 通过 onMediaItemTransition 事件通知前端
+                            } else {
+                                // 没有下一首在队列中，通知前端处理
+                                android.util.Log.d("ExoPlayerPlugin", "DEBUG: 队列无下一首，通知前端处理")
+                                sendEndedEventWithRetry(0)
+                            }
+                        } else {
+                            // 可能是息屏导致的意外中断，尝试恢复播放
+                            android.util.Log.w("ExoPlayerPlugin", "DEBUG: 疑似息屏导致的假结束 (progress=${(progress * 100).toInt()}%)，尝试恢复播放")
+                            mainHandler.postDelayed({
+                                controller?.let { p ->
+                                    if (p.playbackState == Player.STATE_ENDED && !p.isPlaying) {
+                                        // 从当前位置重新准备并播放
+                                        p.seekTo(position)
+                                        p.prepare()
+                                        p.play()
+                                        android.util.Log.d("ExoPlayerPlugin", "DEBUG: 已尝试恢复播放")
+                                    }
+                                }
+                            }, 500)
+                        }
+                    } else {
+                        android.util.Log.e("ExoPlayerPlugin", "DEBUG: 歌曲播放结束，发送 onEnded 事件")
+                        sendEndedEventWithRetry(0)
+                    }
                 }
             }
 
@@ -86,6 +127,17 @@ class ExoPlayerPlugin : Plugin() {
                 val data = JSObject()
                 data.put("mediaId", mediaItem?.mediaId ?: "")
                 data.put("reason", reason)
+                
+                // MEDIA_ITEM_TRANSITION_REASON_AUTO = 1, 表示 ExoPlayer 自动切换到下一首（当前歌曲播放结束）
+                // MEDIA_ITEM_TRANSITION_REASON_SEEK = 2, 表示通过 seek 切换
+                // MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED = 0, 表示播放列表变化
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: ExoPlayer 自动切换到下一首: ${mediaItem?.mediaId}")
+                    data.put("nativeAutoNext", true)
+                } else {
+                    android.util.Log.d("ExoPlayerPlugin", "DEBUG: 歌曲切换，原因: $reason, mediaId: ${mediaItem?.mediaId}")
+                }
+                
                 notifyListeners("onTrackChange", data)
             }
 
@@ -162,35 +214,46 @@ class ExoPlayerPlugin : Plugin() {
             return
         }
         
-        android.util.Log.d("ExoPlayerPlugin", "原生层自动播放下一首: ${next.title}")
+        android.util.Log.e("ExoPlayerPlugin", "DEBUG: 原生层自动播放下一首: ${next.title}, URL: ${next.url.take(50)}")
         
-        controller?.let { player ->
-            val metadata = MediaMetadata.Builder()
-                .setTitle(next.title)
-                .setArtist(next.artist)
-                .apply {
-                    next.cover?.let { setArtworkUri(android.net.Uri.parse(it)) }
+        // 确保在主线程执行
+        mainHandler.post {
+            controller?.let { player ->
+                try {
+                    val metadata = MediaMetadata.Builder()
+                        .setTitle(next.title)
+                        .setArtist(next.artist)
+                        .apply {
+                            next.cover?.let { setArtworkUri(android.net.Uri.parse(it)) }
+                        }
+                        .build()
+
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(next.url)
+                        .setMediaId(next.id)
+                        .setMediaMetadata(metadata)
+                        .build()
+
+                    android.util.Log.d("ExoPlayerPlugin", "DEBUG: 开始设置 MediaItem 并播放")
+                    player.setMediaItem(mediaItem)
+                    player.prepare()
+                    player.play()
+                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: play() 已调用，等待播放开始")
+                    
+                    // 清空已使用的下一首信息
+                    nextTrack = null
+                    
+                    // 通知前端当前播放的歌曲变了
+                    val changeData = JSObject()
+                    changeData.put("mediaId", next.id)
+                    changeData.put("nativeAutoNext", true)
+                    notifyListeners("onTrackChange", changeData)
+                } catch (e: Exception) {
+                    android.util.Log.e("ExoPlayerPlugin", "DEBUG: playNextTrackNatively 异常", e)
                 }
-                .build()
-
-            val mediaItem = MediaItem.Builder()
-                .setUri(next.url)
-                .setMediaId(next.id)
-                .setMediaMetadata(metadata)
-                .build()
-
-            player.setMediaItem(mediaItem)
-            player.prepare()
-            player.play()
-            
-            // 清空已使用的下一首信息
-            nextTrack = null
-            
-            // 通知前端（如果能收到的话）当前播放的歌曲变了
-            val changeData = JSObject()
-            changeData.put("mediaId", next.id)
-            changeData.put("nativeAutoNext", true)
-            notifyListeners("onTrackChange", changeData)
+            } ?: run {
+                android.util.Log.e("ExoPlayerPlugin", "DEBUG: controller 为 null，无法播放")
+            }
         }
     }
 
@@ -324,6 +387,35 @@ class ExoPlayerPlugin : Plugin() {
         if (url != null && id != null) {
             nextTrack = NextTrackInfo(url, id, title, artist, cover)
             android.util.Log.d("ExoPlayerPlugin", "已设置下一首: $title")
+            
+            // 将下一首添加到 ExoPlayer 播放队列末尾
+            // 这样歌曲结束后 ExoPlayer 可以自动切换
+            mainHandler.post {
+                controller?.let { player ->
+                    // 只有当队列中没有下一首时才添加
+                    if (!player.hasNextMediaItem()) {
+                        val metadata = MediaMetadata.Builder()
+                            .setTitle(title)
+                            .setArtist(artist)
+                            .apply {
+                                cover?.let { setArtworkUri(android.net.Uri.parse(it)) }
+                            }
+                            .build()
+
+                        val mediaItem = MediaItem.Builder()
+                            .setUri(url)
+                            .setMediaId(id)
+                            .setMediaMetadata(metadata)
+                            .build()
+                        
+                        player.addMediaItem(mediaItem)
+                        android.util.Log.e("ExoPlayerPlugin", "DEBUG: 已将下一首添加到队列: $title, 当前队列大小: ${player.mediaItemCount}")
+                    } else {
+                        android.util.Log.d("ExoPlayerPlugin", "队列已有下一首，跳过添加")
+                    }
+                }
+            }
+            
             call.resolve(JSObject().put("success", true))
         } else {
             // 清空下一首信息
@@ -579,6 +671,11 @@ class ExoPlayerPlugin : Plugin() {
     @PluginMethod
     fun getCacheStats(call: PluginCall) {
         mainHandler.post {
+            val ctx = context
+            if (ctx != null) {
+                // 确保缓存已初始化
+                ExoPlayerService.getCache(ctx)
+            }
             val (size, count) = ExoPlayerService.getCacheStats()
             val result = JSObject()
             result.put("sizeBytes", size)
@@ -605,6 +702,21 @@ class ExoPlayerPlugin : Plugin() {
         mainHandler.post {
             ExoPlayerService.clearCache()
             call.resolve(JSObject().put("success", true))
+        }
+    }
+
+    @PluginMethod
+    fun getCachedSongs(call: PluginCall) {
+        mainHandler.post {
+            val ctx = context
+            if (ctx != null) {
+                // 确保缓存已初始化
+                ExoPlayerService.getCache(ctx)
+            }
+            val keys = ExoPlayerService.getCachedKeys()
+            val result = JSObject()
+            result.put("keys", JSArray(keys))
+            call.resolve(result)
         }
     }
 

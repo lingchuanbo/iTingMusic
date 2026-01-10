@@ -271,6 +271,9 @@ class AudioPlayer {
       try {
         console.log('AudioPlayer: ExoPlayer play URL:', playUrl.substring(0, 80))
 
+        // 先预加载下一首歌曲信息，这样播放时通知栏就能显示下一首按钮
+        await this.preloadNextTrackForNative(store)
+
         // 直接播放单曲，由前端管理切歌逻辑
         await nativeAudioPlayer.play(playUrl, track)
 
@@ -279,9 +282,6 @@ class AudioPlayer {
 
         store.isPlaying = true
         console.log('AudioPlayer: ExoPlayer 播放开始')
-
-        // 预加载下一首歌曲信息，用于息屏时原生层自动切歌
-        this.preloadNextTrackForNative(store)
       } catch (e) {
         console.error('AudioPlayer: ExoPlayer 播放失败', e)
         this.handlePlayError(store)

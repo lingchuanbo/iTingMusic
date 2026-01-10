@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
 import { audioCache, type CacheMeta } from '@/services/cache/AudioCache'
@@ -13,6 +14,10 @@ const offlineStore = useOfflineStore()
 const loading = ref(true)
 const cachedTracks = ref<(CacheMeta & { track?: Track })[]>([])
 const exportingId = ref<string | null>(null)
+
+// 原生缓存统计（仅 Android）
+const nativeCacheSize = ref(0)
+const nativeCacheCount = ref(0)
 
 // 移动端操作菜单
 const showActionMenu = ref(false)
@@ -35,21 +40,72 @@ function formatSize(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
-// 总缓存大小
+// 总缓存大小：Android 使用原生统计，Web 使用 IndexedDB 统计
 const totalSize = computed(() => {
+  if (Capacitor.isNativePlatform()) {
+    return nativeCacheSize.value
+  }
   return cachedTracks.value.reduce((sum, t) => sum + t.size, 0)
+})
+
+// 缓存歌曲数量：Android 使用原生统计
+const cacheCount = computed(() => {
+  if (Capacitor.isNativePlatform()) {
+    return nativeCacheCount.value
+  }
+  return cachedTracks.value.length
 })
 
 // 加载缓存列表
 async function loadCachedTracks() {
   loading.value = true
   try {
-    const metas = await audioCache.getCacheList()
-    // 尝试从 trackStorage 获取完整的 track 信息
-    cachedTracks.value = metas.map(meta => {
-      const track = trackStorage.getTrack(meta.id)
-      return { ...meta, track }
-    })
+    if (Capacitor.isNativePlatform()) {
+      // Android: 获取原生缓存统计和歌曲列表
+      const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
+      const stats = await nativeAudioPlayer.getCacheStats()
+      nativeCacheSize.value = stats.sizeBytes
+      nativeCacheCount.value = stats.count
+      
+      // 获取缓存的歌曲 URL 列表
+      const cachedKeys = await nativeAudioPlayer.getCachedSongs()
+      
+      // 从 trackStorage 中匹配歌曲信息
+      // 因为缓存 key 是 API URL (如 .../api/?source=netease&id=xxx&type=url...)
+      // 需要从 URL 中提取 id 参数来匹配 track._songId
+      const allTracks = trackStorage.getAllTracks()
+      cachedTracks.value = allTracks
+        .filter((track: any) => {
+          // 检查歌曲是否在缓存列表中
+          // 方式1: 完整 URL 匹配
+          // 方式2: 从缓存 URL 的 id 参数匹配 track._songId
+          const songId = track._songId
+          if (!songId) return false
+          
+          return cachedKeys.some(key => {
+            // 精确匹配 id 参数: &id=xxx& 或 &id=xxx (末尾)
+            return key.includes(`&id=${songId}&`) || 
+                   key.includes(`&id=${songId}`) ||
+                   key === track.url
+          })
+        })
+        .map((track: any) => ({
+          id: track.id,
+          title: track.title,
+          artist: track.artist,
+          size: 0, // 原生缓存不提供单个文件大小
+          cachedAt: Date.now(),
+          lastAccess: Date.now(),
+          track
+        }))
+    } else {
+      // Web: 使用 IndexedDB
+      const metas = await audioCache.getCacheList()
+      cachedTracks.value = metas.map(meta => {
+        const track = trackStorage.getTrack(meta.id)
+        return { ...meta, track }
+      })
+    }
   } finally {
     loading.value = false
   }
@@ -181,7 +237,7 @@ onMounted(loadCachedTracks)
 
       <!-- 统计信息 -->
       <div class="flex items-center gap-4 text-sm text-white/50">
-        <span>{{ cachedTracks.length }} 首歌曲</span>
+        <span>{{ cacheCount }} 首歌曲</span>
         <span>{{ formatSize(totalSize) }}</span>
         <!-- 刷新按钮 -->
         <button

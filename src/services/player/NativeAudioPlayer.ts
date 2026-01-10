@@ -6,6 +6,7 @@
 import { registerPlugin } from '@capacitor/core'
 import type { PluginListenerHandle } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
+import { logger } from '@/services/LoggerService'
 import type { Track, PlayMode } from '@/types'
 
 // 插件接口定义
@@ -70,6 +71,7 @@ interface ExoPlayerPlugin {
     getCacheStats(): Promise<{ sizeBytes: number; sizeMB: number; count: number }>
     isCached(options: { mediaId: string }): Promise<{ cached: boolean }>
     clearCache(): Promise<{ success: boolean }>
+    getCachedSongs(): Promise<{ keys: string[] }>
 
     // 事件监听
     addListener(
@@ -134,19 +136,61 @@ class NativeAudioPlayer {
         try {
             // 1. 播放结束监听 (最优先，核心逻辑)
             console.log('NativeAudioPlayer: 正在注册 onEnded...')
-            const endedListener = await NativeExoPlayer.addListener('onEnded', (data) => {
+            const endedListener = await NativeExoPlayer.addListener('onEnded', async (data: any) => {
                 console.warn('NativeAudioPlayer: [EVENT] 收到 onEnded 事件', JSON.stringify(data))
                 const store = usePlayerStore()
-                console.log('NativeAudioPlayer: 处理播放结束. 模式:', store.playMode, '索引:', store.currentIndex)
+                const currentTrack = store.playlist[store.currentIndex]
+
+                // 检查是否由原生层已经处理了切歌
+                if (data.nativeHandled && data.nextTrackId) {
+                    logger.info(`[onEnded] 原生层已处理切歌，同步前端状态 -> ${data.nextTrackId}`)
+                    console.log('NativeAudioPlayer: 原生层已处理切歌，同步前端状态')
+                    // 查找下一首在播放列表中的索引
+                    const nextIndex = store.playlist.findIndex(t => t.id === data.nextTrackId)
+                    if (nextIndex >= 0) {
+                        store.currentIndex = nextIndex
+                        store.currentTime = 0
+                        store.duration = 0
+                        store.isPlaying = true
+                        logger.info(`[onEnded] 前端状态已同步，当前索引: ${nextIndex}`)
+                    }
+                    return // 原生层已处理，不需要前端再切歌
+                }
+
+                // 计算播放进度，检测是否是真正的播放结束
+                const progress = store.duration > 0 ? store.currentTime / store.duration : 0
+                const isRealEnd = progress >= 0.90 || store.currentTime >= store.duration - 2
+
+                logger.warn(`[onEnded] 播放结束事件触发 - 进度: ${(progress * 100).toFixed(1)}%, 当前时间: ${store.currentTime.toFixed(1)}s, 总时长: ${store.duration.toFixed(1)}s`)
+                logger.info(`[onEnded] 当前: ${currentTrack?.title || 'N/A'}, 模式: ${store.playMode}, 索引: ${store.currentIndex}/${store.playlist.length}, 真正结束: ${isRealEnd}`)
+
+                // 如果播放进度不足 90%，可能是息屏导致的假结束，尝试恢复播放
+                if (!isRealEnd) {
+                    logger.warn(`[onEnded] 疑似息屏导致的假结束，尝试恢复播放`)
+                    console.warn('NativeAudioPlayer: 进度不足90%，尝试恢复播放')
+                    try {
+                        // 尝试恢复播放
+                        await NativeExoPlayer.seek({ position: store.currentTime })
+                        await NativeExoPlayer.resume()
+                        logger.info(`[onEnded] 已尝试恢复播放`)
+                        return // 不执行切歌逻辑
+                    } catch (e) {
+                        logger.error(`[onEnded] 恢复播放失败: ${e}`)
+                        // 恢复失败，继续执行正常的切歌逻辑
+                    }
+                }
 
                 if (store.playMode === 'single') {
                     console.log('NativeAudioPlayer: 单曲循环 -> 重新播放')
+                    logger.info(`[onEnded] 单曲循环 -> 重新播放`)
                     store.playTrack(store.currentIndex)
                 } else if (store.playMode === 'sequence' && store.currentIndex >= store.playlist.length - 1) {
                     console.log('NativeAudioPlayer: 顺序播放已到末尾')
+                    logger.info(`[onEnded] 顺序播放已到末尾, 停止`)
                     store.isPlaying = false
                 } else {
                     console.log('NativeAudioPlayer: 切换下一首')
+                    logger.info(`[onEnded] 切换下一首`)
                     store.nextTrack()
                 }
             })
@@ -158,6 +202,10 @@ class NativeAudioPlayer {
             const stateListener = await NativeExoPlayer.addListener('onStateChange', (data) => {
                 // console.log('NativeAudioPlayer: [EVENT] onStateChange', data.isPlaying)
                 const store = usePlayerStore()
+                // 只记录播放/暂停状态变化
+                if (store.isPlaying !== data.isPlaying) {
+                    logger.info(`[onStateChange] ${data.isPlaying ? '开始播放' : '暂停'}`)
+                }
                 store.isPlaying = data.isPlaying
                 if (data.duration > 0) {
                     store.setDuration(data.duration / 1000)
@@ -187,12 +235,26 @@ class NativeAudioPlayer {
 
             // 4. 歌曲切换监听
             console.log('NativeAudioPlayer: 正在注册 onTrackChange...')
-            const trackListener = await NativeExoPlayer.addListener('onTrackChange', async (data) => {
-                console.log('NativeAudioPlayer: [EVENT] onTrackChange', data.mediaId)
+            const trackListener = await NativeExoPlayer.addListener('onTrackChange', async (data: any) => {
+                console.log('NativeAudioPlayer: [EVENT] onTrackChange', data.mediaId, data.nativeAutoNext ? '(原生自动切歌)' : '')
                 const store = usePlayerStore()
                 const index = store.playlist.findIndex(t => t.id === data.mediaId)
                 if (index >= 0 && index !== store.currentIndex) {
+                    const newTrack = store.playlist[index]
+                    logger.info(`[onTrackChange] 切换到: ${newTrack?.title || data.mediaId}${data.nativeAutoNext ? ' (原生自动切歌)' : ''}`)
                     store.currentIndex = index
+                    store.currentTime = 0
+                    store.duration = 0
+
+                    // 如果是原生层自动切歌，确保播放状态为 true
+                    if (data.nativeAutoNext) {
+                        store.isPlaying = true
+                        logger.info(`[onTrackChange] 原生自动切歌，设置 isPlaying = true`)
+
+                        // 关键：自动切歌后立即预加载下一首到原生层队列
+                        // 这样队列始终有下一首可播放，保证连续息屏播放
+                        this.preloadNextTrackToQueue(store)
+                    }
                 }
 
                 // 检查新歌曲是否已缓存 (使用前端缓存追踪)
@@ -205,6 +267,7 @@ class NativeAudioPlayer {
             console.log('NativeAudioPlayer: 正在注册 onError...')
             const errorListener = await NativeExoPlayer.addListener('onError', (data) => {
                 console.error('NativeAudioPlayer: [EVENT] 播放错误', data.code, data.message)
+                logger.error(`[onError] 播放错误: ${data.code} - ${data.message}`)
                 const store = usePlayerStore()
                 store.isPlaying = false
                 setTimeout(() => store.nextTrack(), 1000)
@@ -449,6 +512,14 @@ class NativeAudioPlayer {
     }
 
     /**
+     * 获取所有已缓存歌曲的 URL 列表
+     */
+    async getCachedSongs(): Promise<string[]> {
+        const result = await NativeExoPlayer.getCachedSongs()
+        return result.keys || []
+    }
+
+    /**
      * 设置下一首歌曲信息（用于息屏时原生自动切歌）
      */
     async setNextTrack(options: {
@@ -459,6 +530,56 @@ class NativeAudioPlayer {
         cover?: string
     }): Promise<void> {
         await NativeExoPlayer.setNextTrack(options)
+    }
+
+    /**
+     * 预加载下一首歌曲到原生层队列
+     * 在歌曲切换后调用，保持队列始终有下一首可播放
+     */
+    private async preloadNextTrackToQueue(store: ReturnType<typeof usePlayerStore>) {
+        const { playlist, currentIndex, playMode } = store
+        if (playlist.length === 0) return
+
+        // 计算下一首索引
+        let nextIndex: number
+        if (playMode === 'shuffle') {
+            nextIndex = Math.floor(Math.random() * playlist.length)
+        } else if (playMode === 'single') {
+            // 单曲循环，下一首还是当前曲
+            nextIndex = currentIndex
+        } else {
+            // sequence 或 loop
+            nextIndex = (currentIndex + 1) % playlist.length
+        }
+
+        const nextTrack = playlist[nextIndex] as any
+        if (!nextTrack) return
+
+        try {
+            // 获取下一首的实际 URL
+            let nextUrl: string | null = null
+            if (nextTrack._platform && nextTrack._songId) {
+                const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
+                nextUrl = await getActualMusicUrl(nextTrack._platform, nextTrack._songId)
+            } else {
+                nextUrl = nextTrack.url
+            }
+
+            if (nextUrl) {
+                await NativeExoPlayer.setNextTrack({
+                    url: nextUrl,
+                    id: nextTrack.id,
+                    title: nextTrack.title,
+                    artist: nextTrack.artist,
+                    cover: nextTrack.cover
+                })
+                logger.info(`[preloadNextTrackToQueue] 已预加载下一首: ${nextTrack.title}`)
+                console.log('NativeAudioPlayer: 已预加载下一首到队列:', nextTrack.title)
+            }
+        } catch (e) {
+            console.warn('预加载下一首到队列失败:', e)
+            logger.warn(`[preloadNextTrackToQueue] 预加载失败: ${e}`)
+        }
     }
 
     /**

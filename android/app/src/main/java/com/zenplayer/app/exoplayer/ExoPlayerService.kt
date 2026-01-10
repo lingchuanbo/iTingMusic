@@ -17,6 +17,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.database.StandaloneDatabaseProvider
@@ -82,6 +83,13 @@ class ExoPlayerService : MediaSessionService() {
                 }
             }
             return Pair(totalSize, keys.size)
+        }
+        
+        /**
+         * 获取所有缓存的 keys（URL）
+         */
+        fun getCachedKeys(): List<String> {
+            return cache?.keys?.toList() ?: emptyList()
         }
         
         /**
@@ -275,10 +283,15 @@ class ExoPlayerService : MediaSessionService() {
 
         // 使用 CacheDataSource 包装 OkHttp 数据源，实现透明缓存
         // 首次播放时从网络下载并缓存，二次播放直接读取缓存
+        // 使用自定义 CacheKeyFactory，确保缓存 key 是原始 API URL（包含 id 参数）
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(audioCache)
             .setUpstreamDataSourceFactory(okHttpDataSourceFactory)
-            .setCacheWriteDataSinkFactory(null) // 使用默认写入
+            .setCacheWriteDataSinkFactory(CacheDataSink.Factory().setCache(audioCache))
+            .setCacheKeyFactory { dataSpec ->
+                // 使用原始请求 URL 作为缓存 key（这样可以通过 &id=xxx& 匹配）
+                dataSpec.uri.toString()
+            }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR) // 缓存错误时回退到网络
 
         // 初始化 WifiLock 和 WakeLock 以防止息屏时 WiFi 进入休眠或 CPU 停止

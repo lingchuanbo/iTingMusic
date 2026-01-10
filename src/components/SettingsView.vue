@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
 import { useEqualizerStore } from '@/store/equalizer'
@@ -14,7 +15,9 @@ import {
 } from '@/services/ai/AIService'
 import { audioCache } from '@/services/cache/AudioCache'
 import { downloadService, type DownloadSettings } from '@/services/DownloadService'
+import { logger } from '@/services/LoggerService'
 import EqualizerView from '@/components/EqualizerView.vue'
+import LogViewer from '@/components/LogViewer.vue'
 
 const store = usePlayerStore()
 const offlineStore = useOfflineStore()
@@ -22,6 +25,21 @@ const eqStore = useEqualizerStore()
 
 // 均衡器全屏显示状态
 const showEqualizer = ref(false)
+
+// 日志查看器显示状态
+const showLogViewer = ref(false)
+const logCount = ref(logger.getLogCount())
+const logEnabled = ref(logger.enabled)
+
+function toggleLogEnabled() {
+  logEnabled.value = !logEnabled.value
+  logger.setEnabled(logEnabled.value)
+}
+
+function openLogViewer() {
+  logCount.value = logger.getLogCount()
+  showLogViewer.value = true
+}
 
 // 下载设置
 const downloadSettings = ref<DownloadSettings>(downloadService.getSettings())
@@ -100,7 +118,15 @@ function setCacheSize(sizeMB: number) {
 }
 
 async function loadCacheStats() {
-  cacheStats.value = await audioCache.getStats()
+  if (Capacitor.isNativePlatform()) {
+    // Android: 使用 ExoPlayer 原生缓存统计
+    const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
+    const stats = await nativeAudioPlayer.getCacheStats()
+    cacheStats.value = { count: stats.count, totalSize: stats.sizeBytes }
+  } else {
+    // Web: 使用 IndexedDB 缓存
+    cacheStats.value = await audioCache.getStats()
+  }
 }
 
 function formatSize(bytes: number): string {
@@ -112,7 +138,14 @@ function formatSize(bytes: number): string {
 async function clearCache() {
   if (!confirm('确定清空所有缓存？')) return
   cacheLoading.value = true
-  await audioCache.clearAll()
+  if (Capacitor.isNativePlatform()) {
+    // Android: 清空 ExoPlayer 原生缓存
+    const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
+    await nativeAudioPlayer.clearCache()
+  } else {
+    // Web: 清空 IndexedDB 缓存
+    await audioCache.clearAll()
+  }
   await loadCacheStats()
   cacheLoading.value = false
 }
@@ -760,6 +793,67 @@ function toggleSection(section: string) {
         </div>
       </section>
 
+      <!-- 运行日志 -->
+      <section class="bg-white/5 rounded-xl overflow-hidden">
+        <button 
+          @click="toggleSection('logs')"
+          class="w-full flex items-center justify-between p-4 hover:bg-white/5 transition-colors"
+        >
+          <div class="flex items-center gap-3">
+            <svg class="w-5 h-5 text-purple-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            <span class="text-white font-medium">运行日志</span>
+            <span class="text-white/40 text-sm">{{ logEnabled ? `${logCount} 条` : '已关闭' }}</span>
+          </div>
+          <svg 
+            class="w-5 h-5 text-white/40 transition-transform" 
+            :class="{ 'rotate-180': expandedSections.has('logs') }"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          >
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
+        <div v-show="expandedSections.has('logs')" class="px-4 pb-4 space-y-3">
+          <!-- 日志开关 -->
+          <div class="flex items-center justify-between py-2">
+            <div>
+              <p class="text-white text-sm">启用日志记录</p>
+              <p class="text-white/40 text-xs">记录播放器关键事件，用于调试</p>
+            </div>
+            <button
+              @click="toggleLogEnabled"
+              :class="[
+                'relative w-12 h-6 rounded-full transition-colors',
+                logEnabled ? 'bg-purple-500' : 'bg-white/20'
+              ]"
+            >
+              <span
+                :class="[
+                  'absolute top-1 w-4 h-4 rounded-full bg-white transition-transform',
+                  logEnabled ? 'left-7' : 'left-1'
+                ]"
+              ></span>
+            </button>
+          </div>
+
+          <!-- 查看日志按钮 -->
+          <button
+            @click="openLogViewer"
+            class="w-full py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 text-sm text-left px-3 transition-colors flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            查看日志
+          </button>
+        </div>
+      </section>
+
       <!-- 数据管理 -->
       <section class="bg-white/5 rounded-xl overflow-hidden">
         <button 
@@ -844,6 +938,18 @@ function toggleSection(section: string) {
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 日志查看器全屏覆盖层 -->
+  <Teleport to="body">
+    <Transition name="log-slide">
+      <div 
+        v-if="showLogViewer"
+        class="fixed inset-0 z-[100] bg-black"
+      >
+        <LogViewer @close="showLogViewer = false" />
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -856,6 +962,18 @@ function toggleSection(section: string) {
   transform: translateX(100%);
 }
 .eq-slide-leave-to {
+  transform: translateX(100%);
+}
+
+/* 日志查看器滑入动画 */
+.log-slide-enter-active,
+.log-slide-leave-active {
+  transition: transform 0.3s ease;
+}
+.log-slide-enter-from {
+  transform: translateX(100%);
+}
+.log-slide-leave-to {
   transform: translateX(100%);
 }
 </style>
