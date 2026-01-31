@@ -6,6 +6,7 @@ import { trackStorage } from '@/services/TrackStorage'
 
 const STORAGE_KEY = 'zen_player_data'
 const CACHED_URLS_KEY = 'zen_cached_urls'
+const CACHED_ID_URL_KEY = 'zen_cached_id_url'  // 歌曲 ID 到音频 URL 的映射
 
 // 从 localStorage 加载缓存 URL 列表
 function loadCachedUrls(): Set<string> {
@@ -28,6 +29,30 @@ function saveCachedUrls(urls: Set<string>) {
     localStorage.setItem(CACHED_URLS_KEY, JSON.stringify(arr))
   } catch (e) {
     console.error('保存缓存URL列表失败:', e)
+  }
+}
+
+// 加载歌曲 ID 到音频 URL 的映射 (用于 Android 缓存复用)
+function loadCachedIdUrls(): Map<string, string> {
+  try {
+    const data = localStorage.getItem(CACHED_ID_URL_KEY)
+    if (data) {
+      return new Map(Object.entries(JSON.parse(data)))
+    }
+  } catch (e) {
+    console.error('加载缓存ID-URL映射失败:', e)
+  }
+  return new Map()
+}
+
+// 保存歌曲 ID 到音频 URL 的映射
+function saveCachedIdUrls(map: Map<string, string>) {
+  try {
+    // 限制最多保存 500 条记录
+    const entries = Array.from(map.entries()).slice(-500)
+    localStorage.setItem(CACHED_ID_URL_KEY, JSON.stringify(Object.fromEntries(entries)))
+  } catch (e) {
+    console.error('保存缓存ID-URL映射失败:', e)
   }
 }
 function loadFromStorage() {
@@ -69,6 +94,9 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 缓存 URL 记录 (前端追踪已缓存的歌曲)
   const cachedUrls = loadCachedUrls()
+
+  // 歌曲 ID 到音频 URL 的映射 (用于 Android 缓存复用)
+  const cachedIdUrls = loadCachedIdUrls()
 
   // 计算属性
   const currentTrack = computed(() =>
@@ -213,10 +241,21 @@ export const usePlayerStore = defineStore('player', () => {
   function checkAndSetCached() {
     const track = currentTrack.value
     if (track?.url) {
-      isCached.value = cachedUrls.has(track.url)
+      isCached.value = cachedUrls.has(track.url) || cachedIdUrls.has(track.id)
     } else {
       isCached.value = false
     }
+  }
+
+  // 获取歌曲已缓存的音频 URL (用于 Android 缓存复用)
+  function getCachedAudioUrl(trackId: string): string | null {
+    return cachedIdUrls.get(trackId) || null
+  }
+
+  // 保存歌曲的音频 URL 到缓存映射 (用于 Android 缓存复用)
+  function saveCachedAudioUrl(trackId: string, audioUrl: string) {
+    cachedIdUrls.set(trackId, audioUrl)
+    saveCachedIdUrls(cachedIdUrls)
   }
 
   function setVolume(v: number) {
@@ -274,6 +313,6 @@ export const usePlayerStore = defineStore('player', () => {
     playlist, currentIndex, playVersion, isPlaying, currentTime, duration, buffered, isCached, volume, playMode, showLyrics, backgroundPlayEnabled,
     currentTrack, progress,
     setPlaylist, addTrack, playTrack, togglePlay, nextTrack, prevTrack,
-    setCurrentTime, setDuration, setBuffered, setCached, markCurrentAsCached, checkAndSetCached, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, removeTrack, toggleBackgroundPlay
+    setCurrentTime, setDuration, setBuffered, setCached, markCurrentAsCached, checkAndSetCached, getCachedAudioUrl, saveCachedAudioUrl, setVolume, togglePlayMode, toggleLyrics, clearPlaylist, removeTrack, toggleBackgroundPlay
   }
 })

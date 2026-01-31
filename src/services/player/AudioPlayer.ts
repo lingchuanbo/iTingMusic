@@ -257,24 +257,27 @@ class AudioPlayer {
       try {
         // ExoPlayer 不能使用 blob 缓存，需要直接使用 HTTP URL
         if (this.useExoPlayer) {
-          // Android ExoPlayer: 先检查原生缓存，已缓存则跳过 API 请求
+          // Android ExoPlayer: 使用前端记录的 ID-URL 映射复用已缓存的 URL
           if (onlineTrack._platform && onlineTrack._songId) {
-            // 使用歌曲 ID 检查 ExoPlayer 原生缓存
-            const isCached = await nativeAudioPlayer.isCached(track.id)
+            // 先检查前端是否记录了该歌曲的缓存 URL
+            const cachedAudioUrl = store.getCachedAudioUrl(track.id)
 
-            if (isCached) {
-              // 已缓存：使用原 URL，ExoPlayer 会从缓存读取
-              console.log('AudioPlayer: ExoPlayer 缓存命中，跳过 API 请求:', track.id)
-              playUrl = url // 使用传入的原 URL
+            if (cachedAudioUrl) {
+              // 有缓存记录：使用记录的 URL，ExoPlayer 会从缓存读取
+              console.log('AudioPlayer: 使用缓存 URL，跳过 API 请求:', track.id)
+              playUrl = cachedAudioUrl
               store.setCached(true)
               store.setBuffered(100)
             } else {
-              // 未缓存：请求 API 获取新 URL
+              // 无缓存：请求 API 获取新 URL
+              console.log('AudioPlayer: 无缓存记录，请求 API:', track.id)
               store.setCached(false)
               store.setBuffered(0)
               const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
               if (actualUrl) {
                 playUrl = actualUrl
+                // 保存 URL 到前端缓存映射，下次播放时可复用
+                store.saveCachedAudioUrl(track.id, actualUrl)
               } else {
                 console.error('无法获取音频URL')
                 this.handlePlayError(store)
