@@ -17,6 +17,7 @@ import {
   type TargetLanguage
 } from '@/services/ai/LyricsTranslator'
 import { isAIConfigured } from '@/services/ai/AIService'
+import { interpretLyrics, type InterpretationResult } from '@/services/ai/LyricsInterpreter'
 
 const store = usePlayerStore()
 
@@ -37,11 +38,14 @@ watch(() => store.showLyrics, (isOpen) => {
 
 onMounted(() => {
   window.addEventListener('popstate', handlePopState)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   loadLyricsSettings()
 })
 
 onUnmounted(() => {
   window.removeEventListener('popstate', handlePopState)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  if (rafId) cancelAnimationFrame(rafId)
 })
 
 const lyricsContainer = ref<HTMLElement>()
@@ -57,6 +61,34 @@ const lyricsDisplayMode = ref<'original' | 'translated' | 'bilingual'>('original
 
 // 翻译 API 配置
 const translateConfig = ref(loadTranslateConfig())
+
+// 歌词解读相关
+const isInterpreting = ref(false)
+const interpretationResult = ref<InterpretationResult | null>(null)
+const showInterpretation = ref(false)
+
+async function handleInterpretLyrics() {
+  if (!store.currentTrack?.title || !store.currentTrack?.artist || !store.currentTrack?.lrc) return
+  
+  if (interpretationResult.value && interpretationResult.value.songTitle === store.currentTrack.title) {
+    showInterpretation.value = true
+    return
+  }
+
+  isInterpreting.value = true
+  try {
+    interpretationResult.value = await interpretLyrics(
+      store.currentTrack.title,
+      store.currentTrack.artist,
+      store.currentTrack.lrc
+    )
+    showInterpretation.value = true
+  } catch (error: any) {
+    alert(error.message || '歌词解读失败')
+  } finally {
+    isInterpreting.value = false
+  }
+}
 
 // 歌词设置
 interface LyricsSettings {
@@ -138,13 +170,58 @@ watch(translatedLrc, (lrc) => {
 const cachedLyricIndex = ref(-1)
 watch(currentLyricIndex, (val) => { cachedLyricIndex.value = val })
 
-// 计算当前行播放进度 (0-100)
+// --- 性能优化：高精度时间插值与生命周期管理 ---
+const preciseTime = ref(store.currentTime)
+let lastFrameTime = performance.now()
+let rafId: number | null = null
+
+// 监听页面可见性，节省后台 CPU
+const isDocumentHidden = ref(document.hidden)
+function handleVisibilityChange() {
+  isDocumentHidden.value = document.hidden
+}
+
+function updatePreciseTime(now: number) {
+  // 核心节流控制：仅在显示、播放且非后台时运行
+  if (store.showLyrics && store.isPlaying && !isDocumentHidden.value) {
+    const deltaTime = (now - lastFrameTime) / 1000
+    preciseTime.value += deltaTime
+    rafId = requestAnimationFrame(updatePreciseTime)
+  } else {
+    rafId = null
+  }
+  lastFrameTime = now
+}
+
+// 播放及其可见性状态综合监听
+watch(
+  [() => store.isPlaying, () => store.showLyrics, isDocumentHidden],
+  ([playing, showing, hidden]) => {
+    if (playing && showing && !hidden) {
+      lastFrameTime = performance.now()
+      if (!rafId) rafId = requestAnimationFrame(updatePreciseTime)
+    } else if (rafId) {
+      cancelAnimationFrame(rafId)
+      rafId = null
+    }
+  },
+  { immediate: true }
+)
+
+// 监听时间跳变（如 seek 或同步）
+watch(() => store.currentTime, (newTime) => {
+  if (Math.abs(preciseTime.value - newTime) > 0.3) {
+    preciseTime.value = newTime
+  }
+})
+
+// 计算当前行播放进度 (0-100) - 使用高精度时间
 const currentLineProgress = computed(() => {
   if (cachedLyricIndex.value < 0 || !lyrics.value.length) return 0
   
   const currentLine = lyrics.value[cachedLyricIndex.value]
   const nextLine = lyrics.value[cachedLyricIndex.value + 1]
-  const currentTime = store.currentTime
+  const currentTime = preciseTime.value
   
   if (!currentLine) return 0
   
@@ -159,28 +236,53 @@ const currentLineProgress = computed(() => {
 })
 
 
-// 歌词样式（模糊效果）
-function getLyricStyle(index: number) {
-  const isCurrent = index === cachedLyricIndex.value
-  const distance = Math.abs(index - cachedLyricIndex.value)
+// --- 性能优化：样式缓存与视窗限制 ---
+// 使用计算属性缓存复杂的样式信息，避免在 60fps 循环中重复计算 filter: blur 等昂贵属性
+const lyricStylesCache = ref<Record<number, any>>({})
+
+watch([cachedLyricIndex, () => lyricsSettings.value.blur], () => {
+  const styles: Record<number, any> = {}
+  const currentIndex = cachedLyricIndex.value
   
-  if (isCurrent) {
-    // 卡拉OK 效果现在通过 span 分割实现，外层只需要基础样式
-    return { 
-      transform: 'scale(1.02)', // 微微放大增加强调感
-      transformOrigin: 'left center'
+  // 只在当前行附近应用复杂的模糊逻辑，远处的直接固定
+  lyrics.value.forEach((_, index) => {
+    const isCurrent = index === currentIndex
+    const distance = Math.abs(index - currentIndex)
+    
+    if (isCurrent) {
+      styles[index] = { 
+        transform: 'scale(1.02)',
+        transformOrigin: 'left center'
+      }
+      return
     }
-  }
-  
-  if (!lyricsSettings.value.blur) return {}
-  
-  if (distance > 5) {
-    return { filter: 'blur(3px)', opacity: 0.3 }
-  }
-  return {
-    filter: `blur(${Math.min(distance * 0.8, 3)}px)`,
-    opacity: Math.max(0.3, 1 - distance * 0.15)
-  }
+
+    if (!lyricsSettings.value.blur) {
+      styles[index] = { opacity: Math.max(0.3, 1 - distance * 0.15) }
+      return
+    }
+
+    // 仅对当前行 +/- 5 行应用动态模糊，更远的直接应用最大模糊和低透明度
+    if (distance > 5) {
+      styles[index] = { filter: 'blur(3px)', opacity: 0.3 }
+    } else {
+      styles[index] = {
+        filter: `blur(${Math.min(distance * 0.8, 3)}px)`,
+        opacity: Math.max(0.3, 1 - distance * 0.15)
+      }
+    }
+  })
+  lyricStylesCache.value = styles
+}, { immediate: true })
+
+function getLyricStyle(index: number) {
+  return lyricStylesCache.value[index] || {}
+}
+
+// 判断某行是否在"活跃视窗"内，减少 DOM 操作和渲染压力
+const isLineVisible = (index: number) => {
+  const distance = Math.abs(index - cachedLyricIndex.value)
+  return distance <= 20 // 仅处理当前行前后 20 行
 }
 
 // 用户滚动相关
@@ -465,6 +567,9 @@ watch(
       if (cached) {
         translatedLrc.value = cached
       }
+      // 重置解读内容
+      interpretationResult.value = null
+      showInterpretation.value = false
     }
   }
 )
@@ -570,11 +675,12 @@ watch(
             <div
               v-for="(line, index) in lyrics"
               :key="index"
+              v-show="isLineVisible(index)"
               :class="[
                 'transition-all duration-300 leading-relaxed py-3',
                 currentLyricIndex === index ? 'text-white' : isUserScrolling && seekingLyricIndex === index ? 'text-purple-400' : 'text-white/60'
               ]"
-              :style="getLyricStyle(index)"
+              :style="[getLyricStyle(index), { contain: 'content' }]"
             >
               <!-- 原文歌词 -->
               <p 
@@ -652,6 +758,23 @@ watch(
             </svg>
             {{ isTranslating ? '翻译中' : translatedLrc ? lyricsDisplayModeText : '翻译' }}
           </button>
+          
+          <!-- AI 解读按钮 -->
+          <button
+            @click.stop="handleInterpretLyrics"
+            :disabled="isInterpreting"
+            class="ml-2 px-4 py-1.5 rounded-full text-xs transition-all flex items-center gap-1.5 bg-white/10 text-white/60 hover:bg-white/20 hover:text-white disabled:opacity-50"
+          >
+            <svg v-if="isInterpreting" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0012 18.75c-1.03 0-1.9-.4-2.593-.914l-.548-.547z"/>
+            </svg>
+            {{ isInterpreting ? '分析中' : 'AI 解读' }}
+          </button>
+
           <!-- 重新翻译按钮 -->
           <button
             v-if="translatedLrc && !isTranslating"
@@ -722,6 +845,78 @@ watch(
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>
             </svg>
           </button>
+        </div>
+      </div>
+    </div>
+  </Transition>
+
+  <!-- AI 解读显示弹窗 -->
+  <Transition name="fade">
+    <div 
+      v-if="showInterpretation && interpretationResult" 
+      class="fixed inset-0 z-[220] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+      @click="showInterpretation = false"
+    >
+      <div 
+        class="w-full max-w-lg bg-zinc-900/90 border border-white/10 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]" 
+        @click.stop
+      >
+        <!-- 头部 -->
+        <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center text-purple-400">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0012 18.75c-1.03 0-1.9-.4-2.593-.914l-.548-.547z"/>
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-white font-bold">AI 解读</h3>
+              <p class="text-white/40 text-[10px] uppercase tracking-wider">Lyrical Analysis</p>
+            </div>
+          </div>
+          <button @click="showInterpretation = false" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- 内容渲染 -->
+        <div class="flex-1 overflow-y-auto px-6 py-6 pb-10 custom-scrollbar text-left">
+          <!-- 核心主题 -->
+          <div class="mb-8">
+            <div class="text-purple-400 text-xs font-bold mb-2 uppercase tracking-widest opacity-60">Core Theme</div>
+            <div class="text-white text-xl font-bold leading-snug">{{ interpretationResult.theme }}</div>
+          </div>
+
+          <!-- 情感背景 -->
+          <div class="mb-8">
+            <div class="text-purple-400 text-xs font-bold mb-2 uppercase tracking-widest opacity-60">Background</div>
+            <div class="text-white/80 text-sm leading-relaxed">{{ interpretationResult.background }}</div>
+          </div>
+
+          <!-- 关键歌词 -->
+          <div class="mb-8" v-if="interpretationResult.keyLines?.length">
+            <div class="text-purple-400 text-xs font-bold mb-4 uppercase tracking-widest opacity-60">Key Moments</div>
+            <div class="space-y-4">
+              <div v-for="(item, idx) in interpretationResult.keyLines" :key="idx" class="relative pl-4 border-l-2 border-purple-500/30">
+                <div class="text-white font-medium mb-1 italic">"{{ item.line }}"</div>
+                <div class="text-white/60 text-xs leading-relaxed">{{ item.meaning }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 总结 -->
+          <div class="p-4 bg-white/5 rounded-2xl border border-white/5">
+            <div class="text-white/90 text-sm italic leading-relaxed">
+              "{{ interpretationResult.summary }}"
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部 -->
+        <div class="px-6 py-4 bg-white/[0.02] text-center border-t border-white/5">
+          <p class="text-white/20 text-[10px]">AI-generated content based on lyrical context</p>
         </div>
       </div>
     </div>
@@ -875,11 +1070,19 @@ watch(
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
 
 .lyric-sweep {
-  background: linear-gradient(to right, var(--sweep-color) var(--sweep-progress), rgba(255, 255, 255, 0.5) var(--sweep-progress));
+  /* 使用线性渐变实现扫光，增加 10% 的过渡区域使边缘不那么生硬 */
+  background: linear-gradient(
+    to right, 
+    var(--sweep-color) var(--sweep-progress), 
+    rgba(255, 255, 255, 0.4) calc(var(--sweep-progress) + 10%)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  transition: background 0.1s linear;
+  /* 移除原有的 0.1s transition，因为现在是 60fps JS 逐帧更新，不再需要 CSS 过渡，CSS 过渡反而可能导致滞后感 */
+  transition: none;
+  /* 开启 GPU 加速 */
+  will-change: background;
 }
 
 .pt-safe-top { padding-top: max(1rem, env(safe-area-inset-top, 1rem)); }
