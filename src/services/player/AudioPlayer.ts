@@ -257,17 +257,29 @@ class AudioPlayer {
       try {
         // ExoPlayer 不能使用 blob 缓存，需要直接使用 HTTP URL
         if (this.useExoPlayer) {
-          // Android ExoPlayer: 跳过 blob 缓存，直接获取 HTTP URL
+          // Android ExoPlayer: 先检查原生缓存，已缓存则跳过 API 请求
           if (onlineTrack._platform && onlineTrack._songId) {
-            store.setCached(false)
-            store.setBuffered(0)
-            const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
-            if (actualUrl) {
-              playUrl = actualUrl
+            // 使用歌曲 ID 检查 ExoPlayer 原生缓存
+            const isCached = await nativeAudioPlayer.isCached(track.id)
+
+            if (isCached) {
+              // 已缓存：使用原 URL，ExoPlayer 会从缓存读取
+              console.log('AudioPlayer: ExoPlayer 缓存命中，跳过 API 请求:', track.id)
+              playUrl = url // 使用传入的原 URL
+              store.setCached(true)
+              store.setBuffered(100)
             } else {
-              console.error('无法获取音频URL')
-              this.handlePlayError(store)
-              return
+              // 未缓存：请求 API 获取新 URL
+              store.setCached(false)
+              store.setBuffered(0)
+              const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
+              if (actualUrl) {
+                playUrl = actualUrl
+              } else {
+                console.error('无法获取音频URL')
+                this.handlePlayError(store)
+                return
+              }
             }
           }
         } else {
