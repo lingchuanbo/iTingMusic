@@ -9,6 +9,7 @@
     
     <!-- API 服务器域名配置 -->
     <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">tunehub.sayqz.com</domain>
         <domain includeSubdomains="true">music-dl.sayqz.com</domain>
         <trust-anchors>
             <certificates src="system" />

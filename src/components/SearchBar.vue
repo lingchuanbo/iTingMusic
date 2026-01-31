@@ -12,6 +12,7 @@ defineProps<{
 import {
   aggregateSearch,
   searchResultToTrack,
+  searchResultToTrackAsync,
   getLyrics,
   type SearchResult,
   type AudioQuality
@@ -382,9 +383,8 @@ async function playNow(result: SearchResult) {
   playingId.value = getResultKey(result)
   
   try {
-    const track = searchResultToTrack(result, quality.value)
-    const lrc = await getLyrics(result.platform, result.id)
-    track.lrc = lrc
+    // 使用异步版本，自动解析封面和歌词
+    const track = await searchResultToTrackAsync(result, quality.value)
     store.addTrack(track)
     store.playTrack(store.playlist.length - 1)
     showResults.value = false
@@ -415,10 +415,11 @@ async function handleFileSelect(e: Event) {
 
 function getPlatformIcon(platform: string) {
   const icons: Record<string, string> = {
+    qq: 'QQ',
+    tencent: 'QQ',
     netease: '网易',
     kuwo: '酷我',
     kugou: '酷狗',
-    qq: 'QQ',
     migu: '咪咕'
   }
   return icons[platform] || platform

@@ -70,24 +70,70 @@ async function loadCachedTracks() {
       // 获取缓存的歌曲 URL 列表
       const cachedKeys = await nativeAudioPlayer.getCachedSongs()
       
+      // 调试日志
+      console.log('[OfflineView] 原生缓存统计:', { size: stats.sizeBytes, count: stats.count })
+      console.log('[OfflineView] 缓存 URL 列表:', cachedKeys)
+      
       // 从 trackStorage 中匹配歌曲信息
-      // 因为缓存 key 是 API URL (如 .../api/?source=netease&id=xxx&type=url...)
-      // 需要从 URL 中提取 id 参数来匹配 track._songId
       const allTracks = trackStorage.getAllTracks()
+      console.log('[OfflineView] TrackStorage 歌曲数量:', allTracks.length)
+      console.log('[OfflineView] 前5首歌曲信息:', allTracks.slice(0, 5).map((t: any) => ({
+        id: t.id,
+        _songId: t._songId,
+        _platform: t._platform,
+        title: t.title,
+        url: t.url?.substring(0, 80)
+      })))
+      
+      // 从缓存 URL 中提取所有的 id 参数，建立快速查找表
+      const cachedIdSet = new Set<string>()
+      const cachedUrlSet = new Set<string>()
+      
+      cachedKeys.forEach((key: string) => {
+        cachedUrlSet.add(key)
+        // 使用正则提取 URL 中的 id 参数
+        const idMatch = key.match(/[?&]id=([^&]+)/)
+        if (idMatch) {
+          cachedIdSet.add(idMatch[1])
+        }
+      })
+      
+      console.log('[OfflineView] 缓存中提取的 songId 集合:', Array.from(cachedIdSet))
+      
       cachedTracks.value = allTracks
         .filter((track: any) => {
-          // 检查歌曲是否在缓存列表中
-          // 方式1: 完整 URL 匹配
-          // 方式2: 从缓存 URL 的 id 参数匹配 track._songId
           const songId = track._songId
-          if (!songId) return false
+          const trackId = track.id
           
-          return cachedKeys.some(key => {
-            // 精确匹配 id 参数: &id=xxx& 或 &id=xxx (末尾)
-            return key.includes(`&id=${songId}&`) || 
-                   key.includes(`&id=${songId}`) ||
-                   key === track.url
-          })
+          // 匹配策略 1: 使用 _songId 匹配
+          if (songId && cachedIdSet.has(String(songId))) {
+            console.log('[OfflineView] 匹配成功 (songId):', track.title, songId)
+            return true
+          }
+          
+          // 匹配策略 2: 使用 track.id 匹配（某些情况下 _songId 可能未保存）
+          if (trackId && cachedIdSet.has(String(trackId))) {
+            console.log('[OfflineView] 匹配成功 (trackId):', track.title, trackId)
+            return true
+          }
+          
+          // 匹配策略 3: 检查 track.id 是否为 "platform_songId" 格式
+          if (trackId && trackId.includes('_')) {
+            const parts = trackId.split('_')
+            const extractedId = parts[parts.length - 1]
+            if (cachedIdSet.has(extractedId)) {
+              console.log('[OfflineView] 匹配成功 (extractedId):', track.title, extractedId)
+              return true
+            }
+          }
+          
+          // 匹配策略 4: 完整 URL 匹配
+          if (track.url && cachedUrlSet.has(track.url)) {
+            console.log('[OfflineView] 匹配成功 (URL):', track.title)
+            return true
+          }
+          
+          return false
         })
         .map((track: any) => ({
           id: track.id,
@@ -98,6 +144,8 @@ async function loadCachedTracks() {
           lastAccess: Date.now(),
           track
         }))
+      
+      console.log('[OfflineView] 匹配到的缓存歌曲数:', cachedTracks.value.length)
     } else {
       // Web: 使用 IndexedDB
       const metas = await audioCache.getCacheList()
@@ -113,7 +161,31 @@ async function loadCachedTracks() {
 
 // 播放缓存歌曲
 async function playCachedTrack(meta: CacheMeta & { track?: Track }) {
-  // 获取缓存的音频 URL
+  if (Capacitor.isNativePlatform()) {
+    // Android: 直接播放 track 中的 URL (ExoPlayer 会自动处理缓存)
+    if (!meta.track) {
+      alert('歌曲数据丢失')
+      return
+    }
+
+    const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
+    const isCached = await nativeAudioPlayer.isCached(meta.track.url)
+    
+    if (!isCached) {
+      alert('缓存已失效，请重新缓存')
+      await loadCachedTracks()
+      return
+    }
+
+    playerStore.addTrack(meta.track)
+    const idx = playerStore.playlist.findIndex(t => t.id === meta.track!.id)
+    if (idx >= 0) {
+      playerStore.playTrack(idx)
+    }
+    return
+  }
+
+  // Web: 获取缓存的音频 URL
   const cachedUrl = await audioCache.get(meta.id)
   if (!cachedUrl) {
     alert('缓存已失效，请重新缓存')
@@ -152,23 +224,32 @@ async function playAll() {
   // 清空当前播放列表
   playerStore.setPlaylist([])
 
-  // 添加所有缓存歌曲
-  for (const meta of cachedTracks.value) {
-    const cachedUrl = await audioCache.get(meta.id)
-    if (cachedUrl) {
-      const track: Track = meta.track || {
-        id: meta.id,
-        title: meta.title,
-        artist: meta.artist,
-        url: cachedUrl,
-        source: 'online',
-        _cached: true
+  if (Capacitor.isNativePlatform()) {
+    // Android: 直接使用 trackStorage 中的数据
+    for (const meta of cachedTracks.value) {
+      if (meta.track) {
+        playerStore.addTrack(meta.track)
       }
-      const cachedCover = await audioCache.getCover(meta.id)
-      if (cachedCover) {
-        track.cover = cachedCover
+    }
+  } else {
+    // Web: 获取每个音频的 Blob URL
+    for (const meta of cachedTracks.value) {
+      const cachedUrl = await audioCache.get(meta.id)
+      if (cachedUrl) {
+        const track: Track = meta.track || {
+          id: meta.id,
+          title: meta.title,
+          artist: meta.artist,
+          url: cachedUrl,
+          source: 'online',
+          _cached: true
+        }
+        const cachedCover = await audioCache.getCover(meta.id)
+        if (cachedCover) {
+          track.cover = cachedCover
+        }
+        playerStore.addTrack({ ...track, url: cachedUrl })
       }
-      playerStore.addTrack({ ...track, url: cachedUrl })
     }
   }
 
@@ -333,7 +414,7 @@ onMounted(loadCachedTracks)
           <p class="text-white font-medium truncate">{{ item.title }}</p>
           <div class="flex items-center gap-2 text-white/50 text-sm">
             <span class="truncate">{{ item.artist }}</span>
-            <span class="text-white/30 text-xs">{{ formatSize(item.size) }}</span>
+            <span v-if="item.size > 0" class="text-white/30 text-xs">{{ formatSize(item.size) }}</span>
           </div>
         </div>
 
@@ -378,7 +459,7 @@ onMounted(loadCachedTracks)
     <Transition name="action-menu">
       <div 
         v-if="showActionMenu && actionMenuItem" 
-        class="fixed inset-0 z-50 sm:hidden"
+        class="fixed inset-0 z-[200] sm:hidden"
         @click="closeActionMenu"
       >
         <div class="absolute inset-0 bg-black/60"></div>

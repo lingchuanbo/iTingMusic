@@ -2,6 +2,8 @@
  * 音频缓存服务
  * 使用 IndexedDB 存储音频文件、封面、歌词，支持离线播放
  */
+import { Capacitor } from '@capacitor/core'
+import { CapacitorHttp } from '@capacitor/core'
 
 const DB_NAME = 'zen_audio_cache'
 const DB_VERSION = 2
@@ -22,7 +24,7 @@ export interface CacheMeta {
 class AudioCacheService {
   private db: IDBDatabase | null = null
   private initPromise: Promise<void> | null = null
-  
+
   // 最大缓存大小 (500MB)
   private maxCacheSize = 500 * 1024 * 1024
 
@@ -97,7 +99,7 @@ class AudioCacheService {
       const tx = this.db!.transaction([STORE_NAME, META_STORE], 'readwrite')
       const store = tx.objectStore(STORE_NAME)
       const metaStore = tx.objectStore(META_STORE)
-      
+
       const request = store.get(id)
       request.onsuccess = () => {
         if (request.result) {
@@ -109,7 +111,7 @@ class AudioCacheService {
               metaStore.put(metaReq.result)
             }
           }
-          
+
           const blob = request.result.blob
           resolve(URL.createObjectURL(blob))
         } else {
@@ -126,24 +128,53 @@ class AudioCacheService {
   async cache(id: string, url: string, meta: { title: string; artist: string }): Promise<string | null> {
     try {
       await this.init()
-      
+
       // 检查是否已缓存
       if (await this.has(id)) {
         return this.get(id)
       }
 
-      // 下载音频
-      const response = await fetch(url)
-      if (!response.ok) return null
-      
-      const blob = await response.blob()
-      
+      // 下载音频 (使用 native fetch 以避开 CORS)
+      let blob: Blob | null = null
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const response = await CapacitorHttp.get({
+            url,
+            responseType: 'blob'
+          })
+          // CapacitorHttp 在 responseType='blob' 时返回 data 为 base64 字符串 (如果是 blob，通常需要转换)
+          // 或者直接返回 Blob 对象（取决于具体版本和插件实现）
+          // 这里我们做一个安全的转换
+          if (response.data instanceof Blob) {
+            blob = response.data
+          } else if (typeof response.data === 'string') {
+            // 如果是 base64
+            const base64Response = await fetch(`data:audio/mpeg;base64,${response.data}`)
+            blob = await base64Response.blob()
+          }
+        } catch (nativeErr) {
+          console.warn('Native HTTP download failed, falling back to fetch:', nativeErr)
+        }
+      }
+
+      // 如果原生下载失败或不在原生环境，尝试普通 fetch
+      if (!blob) {
+        const response = await fetch(url)
+        if (!response.ok) return null
+        blob = await response.blob()
+      }
+
+      if (!blob) return null
+
+      // 检查缓存空间，必要时清理
+
       // 检查缓存空间，必要时清理
       await this.ensureSpace(blob.size)
 
       // 存储音频
       await this.store(id, blob, meta)
-      
+
       return URL.createObjectURL(blob)
     } catch (e) {
       console.error('缓存音频失败:', e)
@@ -178,7 +209,7 @@ class AudioCacheService {
    */
   private async ensureSpace(needed: number): Promise<void> {
     const stats = await this.getStats()
-    
+
     if (stats.totalSize + needed <= this.maxCacheSize) return
 
     // 按最后访问时间排序，删除最旧的
@@ -187,7 +218,7 @@ class AudioCacheService {
 
     let freed = 0
     const toDelete: string[] = []
-    
+
     for (const meta of metas) {
       if (stats.totalSize - freed + needed <= this.maxCacheSize) break
       toDelete.push(meta.id)

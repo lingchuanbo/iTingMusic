@@ -1,50 +1,28 @@
+/**
+ * 在线音乐 API 源
+ * 封装了搜索、获取歌曲URL、封面、歌词等功能
+ * 现在通过 ApiProviders 抽象层支持多个 API 提供商
+ */
 import type { Track } from '@/types'
-import { Capacitor } from '@capacitor/core'
-import { CapacitorHttp, type HttpResponse } from '@capacitor/core'
+import {
+  getActiveProvider,
+  getActiveProviderId,
+  executeTuneHubMethod,
+  type MusicPlatform,
+  type AudioQuality,
+  type SearchResult,
+  type ApiProviderType
+} from './ApiProviders'
 
-// 开发环境使用代理，生产环境直接请求
-const API_BASE = import.meta.env.DEV ? '/api' : 'https://music-dl.sayqz.com/api'
+// 重新导出类型供其他模块使用
+export type { MusicPlatform as MusicSource, AudioQuality, SearchResult, ApiProviderType }
 
-// 封装 fetch，在原生平台使用 CapacitorHttp 绕过 CORS
-async function nativeFetch(url: string): Promise<Response> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const response: HttpResponse = await CapacitorHttp.get({ url })
-      return new Response(JSON.stringify(response.data), {
-        status: response.status,
-        headers: { 'Content-Type': 'application/json' }
-      })
-    } catch (e) {
-      console.error('CapacitorHttp 请求失败:', e)
-      throw e
-    }
-  }
-  return fetch(url)
-}
+// ========== 音乐源配置 ==========
 
-// 获取文本内容
-async function nativeFetchText(url: string): Promise<string> {
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const response: HttpResponse = await CapacitorHttp.get({ url })
-      return typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-    } catch (e) {
-      console.error('CapacitorHttp 请求失败:', e)
-      throw e
-    }
-  }
-  const res = await fetch(url)
-  return res.text()
-}
-
-export type MusicSource = 'netease' | 'kuwo' | 'kugou' | 'qq' | 'migu'
-export type AudioQuality = '128k' | '320k' | 'flac' | 'flac24bit'
-
-// 获取启用的音乐源
 const MUSIC_SOURCES_KEY = 'enabled_music_sources'
-const defaultEnabledSources: MusicSource[] = ['netease', 'qq']
+const defaultEnabledSources: MusicPlatform[] = ['netease', 'qq', 'kuwo']
 
-export function getEnabledSources(): MusicSource[] {
+export function getEnabledSources(): MusicPlatform[] {
   try {
     const data = localStorage.getItem(MUSIC_SOURCES_KEY)
     if (data) return JSON.parse(data)
@@ -52,7 +30,12 @@ export function getEnabledSources(): MusicSource[] {
   return defaultEnabledSources
 }
 
-// API 响应类型
+export function setEnabledSources(sources: MusicPlatform[]): void {
+  localStorage.setItem(MUSIC_SOURCES_KEY, JSON.stringify(sources))
+}
+
+// ========== API 响应类型 (兼容旧代码) ==========
+
 export interface ApiResponse<T> {
   code: number
   message: string
@@ -67,15 +50,6 @@ export interface SongInfo {
   url: string
   pic: string
   lrc: string
-}
-
-export interface SearchResult {
-  id: string
-  name: string
-  artist: string
-  album?: string
-  url: string
-  platform: MusicSource
 }
 
 export interface SearchData {
@@ -93,90 +67,79 @@ export interface ToplistItem {
   id: string
   name: string
   updateFrequency?: string
+  pic?: string
 }
 
-// 1. 获取歌曲基本信息
-export async function getSongInfo(source: MusicSource, id: string): Promise<SongInfo | null> {
-  try {
-    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=info`)
-    const json: ApiResponse<SongInfo> = await res.json()
-    if (json.code === 200) return json.data
-    return null
-  } catch (e) {
-    console.error('获取歌曲信息失败:', e)
-    return null
-  }
+// ========== 核心 API 函数 ==========
+
+// 1. 获取歌曲基本信息 (TuneHub 不直接支持，返回 null)
+export async function getSongInfo(source: MusicPlatform, id: string): Promise<SongInfo | null> {
+  // TuneHub API 不支持单独获取歌曲信息，需要通过 parse 接口
+  // GD Studio 也需要分开调用
+  console.log(`[OnlineApiSource] getSongInfo 不支持: ${source}/${id}`)
+  return null
 }
 
-// 2. 获取音乐文件链接 (直接返回API端点URL)
-export function getMusicUrl(source: MusicSource, id: string, quality: AudioQuality = '320k'): string {
-  return `${API_BASE}/?source=${source}&id=${id}&type=url&br=${quality}`
+// 2. 获取音乐文件链接
+export function getMusicUrl(source: MusicPlatform, id: string, quality: AudioQuality = '320k'): string {
+  return getActiveProvider().getMusicUrl(source, id, quality)
 }
 
-// 2.1 获取实际的音频文件URL（解析重定向）
+// 2.1 获取实际的音频文件URL (GD Studio 需要异步解析JSON)
 export async function getActualMusicUrl(
-  source: MusicSource,
+  source: MusicPlatform,
   id: string,
   quality: AudioQuality = '320k'
 ): Promise<string> {
-  // 直接返回 API URL，让播放器自己处理重定向
-  // 这样可以避免 CORS 问题
-  return getMusicUrl(source, id, quality)
+  return getActiveProvider().getActualMusicUrl(source, id, quality)
 }
 
 // 3. 获取专辑封面
-export function getCoverUrl(source: MusicSource, id: string): string {
-  return `${API_BASE}/?source=${source}&id=${id}&type=pic`
+export function getCoverUrl(source: MusicPlatform, id: string, picId?: string): string {
+  return getActiveProvider().getCoverUrl(source, id, picId)
+}
+
+// 3.1 获取实际封面图片URL (GD Studio 需要异步解析JSON)
+export async function getActualCoverUrl(source: MusicPlatform, id: string, picId?: string): Promise<string> {
+  return getActiveProvider().getActualCoverUrl(source, id, picId)
 }
 
 // 4. 获取歌词
-export async function getLyrics(source: MusicSource, id: string): Promise<string> {
-  try {
-    return await nativeFetchText(`${API_BASE}/?source=${source}&id=${id}&type=lrc`)
-  } catch (e) {
-    console.error('获取歌词失败:', e)
-    return ''
-  }
+export async function getLyrics(source: MusicPlatform, id: string, lyricId?: string): Promise<string> {
+  return getActiveProvider().getLyrics(source, id, lyricId)
 }
 
 // 5. 搜索歌曲 (单平台)
 export async function searchSongs(
-  source: MusicSource,
+  source: MusicPlatform,
   keyword: string,
   limit: number = 20
 ): Promise<SearchResult[]> {
-  try {
-    const url = `${API_BASE}/?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&limit=${limit}`
-    const res = await nativeFetch(url)
-    const json: ApiResponse<SearchData> = await res.json()
-    if (json.code === 200 && json.data?.results) {
-      // 确保每个结果都有正确的 platform 字段
-      return json.data.results.map(r => ({
-        ...r,
-        platform: r.platform || source
-      }))
-    }
-    return []
-  } catch (e) {
-    console.error(`[${source}] 搜索失败:`, e)
-    return []
-  }
+  return getActiveProvider().search(source, keyword, limit)
 }
 
-// 6. 聚合搜索 (多平台) - 改用并行单平台搜索，确保QQ源优先
+// 6. 聚合搜索 (多平台)
 export async function aggregateSearch(keyword: string): Promise<SearchResult[]> {
   const enabledSources = getEnabledSources()
+  const provider = getActiveProvider()
 
-  // 按优先级排序：QQ > 网易云 > 其他
-  const sourcePriority: Record<MusicSource, number> = {
-    qq: 0,
-    netease: 1,
-    kugou: 2,
+  // 过滤出当前 provider 支持的平台
+  const supportedSources = enabledSources.filter(s =>
+    provider.supportedPlatforms.includes(s)
+  )
+
+  // 按优先级排序
+  const sourcePriority: Record<MusicPlatform, number> = {
+    qq: 1,
+    tencent: 2,
     kuwo: 3,
-    migu: 4
+    netease: 4,
+    joox: 5,
+    kugou: 6,
+    migu: 7
   }
 
-  const sortedSources = [...enabledSources].sort(
+  const sortedSources = [...supportedSources].sort(
     (a, b) => (sourcePriority[a] ?? 99) - (sourcePriority[b] ?? 99)
   )
 
@@ -190,22 +153,30 @@ export async function aggregateSearch(keyword: string): Promise<SearchResult[]> 
 
   const results = await Promise.all(searchPromises)
 
-  // 按平台优先级顺序合并结果
+  // 合并结果
   const merged: SearchResult[] = []
   for (let i = 0; i < sortedSources.length; i++) {
-    const platformResults = results[i]
-    merged.push(...platformResults)
+    merged.push(...results[i])
   }
 
   return merged
 }
 
-// 7. 获取歌单详情
-export async function getPlaylist(source: MusicSource, id: string): Promise<PlaylistInfo | null> {
+// 7. 获取歌单详情 (使用 TuneHub v1/methods/playlist API)
+export async function getPlaylist(source: MusicPlatform, id: string): Promise<PlaylistInfo | null> {
+  if (getActiveProviderId() !== 'sayqz') return null
   try {
-    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=playlist`)
-    const json: ApiResponse<PlaylistInfo> = await res.json()
-    if (json.code === 200) return json.data
+    const results = await executeTuneHubMethod(source, 'playlist', { id })
+    if (results && results.length > 0) {
+      return {
+        list: results.map((item: any) => ({
+          id: String(item.id),
+          name: item.name || '',
+          types: []
+        })),
+        info: { name: '', author: '' }
+      }
+    }
     return null
   } catch (e) {
     console.error('获取歌单失败:', e)
@@ -214,14 +185,14 @@ export async function getPlaylist(source: MusicSource, id: string): Promise<Play
 }
 
 // 7.1 获取歌单歌曲列表
-export async function getPlaylistSongs(source: MusicSource, id: string): Promise<SearchResult[]> {
+export async function getPlaylistSongs(source: MusicPlatform, id: string): Promise<SearchResult[]> {
   try {
     const playlist = await getPlaylist(source, id)
     if (playlist && playlist.list) {
       return playlist.list.map(item => ({
         id: item.id,
         name: item.name,
-        artist: '', // 歌单 API 可能不返回艺人信息
+        artist: '',
         url: '',
         platform: source
       }))
@@ -233,28 +204,37 @@ export async function getPlaylistSongs(source: MusicSource, id: string): Promise
   }
 }
 
-// 8. 获取排行榜列表
-export async function getToplists(source: MusicSource): Promise<ToplistItem[]> {
+// 8. 获取排行榜列表 (使用 TuneHub v1/methods API)
+export async function getToplists(source: MusicPlatform): Promise<ToplistItem[]> {
+  if (getActiveProviderId() !== 'sayqz') return []
   try {
-    const res = await nativeFetch(`${API_BASE}/?source=${source}&type=toplists`)
-    const json: ApiResponse<{ list: ToplistItem[] }> = await res.json()
-    if (json.code === 200) return json.data.list
-    return []
+    const results = await executeTuneHubMethod(source, 'toplists', {})
+    return results.map((item: any) => ({
+      id: String(item.id),
+      name: item.name || '',
+      updateFrequency: item.updateFrequency || '',
+      pic: item.pic || item.cover || item.picUrl || ''
+    }))
   } catch (e) {
     console.error('获取排行榜列表失败:', e)
     return []
   }
 }
 
-// 9. 获取排行榜歌曲
-export async function getToplistSongs(source: MusicSource, id: string): Promise<SearchResult[]> {
+// 9. 获取排行榜歌曲 (使用 TuneHub v1/methods API)
+export async function getToplistSongs(source: MusicPlatform, id: string): Promise<SearchResult[]> {
+  if (getActiveProviderId() !== 'sayqz') return []
   try {
-    const res = await nativeFetch(`${API_BASE}/?source=${source}&id=${id}&type=toplist`)
-    const json: ApiResponse<{ list: SearchResult[]; source: string }> = await res.json()
-    if (json.code === 200) {
-      return json.data.list.map(item => ({ ...item, platform: source }))
-    }
-    return []
+    const results = await executeTuneHubMethod(source, 'toplist', { id })
+    return results.map((item: any) => ({
+      id: String(item.id),
+      name: item.name || '',
+      artist: item.artist || '',
+      album: item.album || '',
+      cover: item.cover || item.pic || item.picUrl || '',
+      url: '',
+      platform: source
+    }))
   } catch (e) {
     console.error('获取排行榜歌曲失败:', e)
     return []
@@ -269,13 +249,38 @@ export function searchResultToTrack(result: SearchResult, quality: AudioQuality 
     title: result.name,
     artist: result.artist,
     album: result.album,
-    cover: getCoverUrl(result.platform, result.id),
+    cover: result.cover || getCoverUrl(result.platform, result.id, result.pic_id),
     url: getMusicUrl(result.platform, result.id, quality),
     source: 'online',
     // 额外存储平台信息用于获取歌词
     _platform: result.platform,
-    _songId: result.id
-  } as Track & { _platform: MusicSource; _songId: string }
+    _songId: result.id,
+    _picId: result.pic_id,
+    _lyricId: result.lyric_id
+  } as Track & { _platform: MusicPlatform; _songId: string; _picId?: string; _lyricId?: string }
+}
+
+// 异步版本：正确解析 GD Studio 封面 URL
+export async function searchResultToTrackAsync(result: SearchResult, quality: AudioQuality = '320k'): Promise<Track> {
+  const [actualCover, lyrics] = await Promise.all([
+    result.cover ? Promise.resolve(result.cover) : getActualCoverUrl(result.platform, result.id, result.pic_id),
+    getLyrics(result.platform, result.id, result.lyric_id)
+  ])
+
+  return {
+    id: `${result.platform}-${result.id}`,
+    title: result.name,
+    artist: result.artist,
+    album: result.album,
+    cover: actualCover,
+    url: getMusicUrl(result.platform, result.id, quality),
+    lrc: lyrics,
+    source: 'online',
+    _platform: result.platform,
+    _songId: result.id,
+    _picId: result.pic_id,
+    _lyricId: result.lyric_id
+  } as Track & { _platform: MusicPlatform; _songId: string; _picId?: string; _lyricId?: string }
 }
 
 // 搜索并直接返回 Track 数组

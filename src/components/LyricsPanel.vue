@@ -67,7 +67,7 @@ interface LyricsSettings {
 
 const defaultLyricsSettings: LyricsSettings = {
   blur: true,
-  align: 'center',
+  align: 'left',
   currentColor: '#ffffff'
 }
 
@@ -138,14 +138,38 @@ watch(translatedLrc, (lrc) => {
 const cachedLyricIndex = ref(-1)
 watch(currentLyricIndex, (val) => { cachedLyricIndex.value = val })
 
-// 歌词样式（模糊效果）- 简化计算
+// 计算当前行播放进度 (0-100)
+const currentLineProgress = computed(() => {
+  if (cachedLyricIndex.value < 0 || !lyrics.value.length) return 0
+  
+  const currentLine = lyrics.value[cachedLyricIndex.value]
+  const nextLine = lyrics.value[cachedLyricIndex.value + 1]
+  const currentTime = store.currentTime
+  
+  if (!currentLine) return 0
+  
+  const startTime = currentLine.time
+  const endTime = nextLine ? nextLine.time : (store.duration || startTime + 5)
+  const duration = endTime - startTime
+  
+  if (duration <= 0) return 0
+  
+  const progress = ((currentTime - startTime) / duration) * 100
+  return Math.max(0, Math.min(100, progress))
+})
+
+
+// 歌词样式（模糊效果）
 function getLyricStyle(index: number) {
   const isCurrent = index === cachedLyricIndex.value
   const distance = Math.abs(index - cachedLyricIndex.value)
   
   if (isCurrent) {
-    // 当前歌词使用用户设置的颜色
-    return { color: lyricsSettings.value.currentColor }
+    // 卡拉OK 效果现在通过 span 分割实现，外层只需要基础样式
+    return { 
+      transform: 'scale(1.02)', // 微微放大增加强调感
+      transformOrigin: 'left center'
+    }
   }
   
   if (!lyricsSettings.value.blur) return {}
@@ -252,7 +276,8 @@ async function refreshLyrics() {
   try {
     const lrc = await getLyrics(
       store.currentTrack._platform as MusicSource,
-      store.currentTrack._songId
+      store.currentTrack._songId,
+      store.currentTrack._lyricId
     )
     if (lrc && store.currentTrack) {
       store.currentTrack.lrc = lrc
@@ -471,10 +496,6 @@ watch(
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
           </svg>
         </button>
-        <div class="flex-1 text-center">
-          <p class="text-white font-medium text-sm truncate px-4">{{ store.currentTrack?.title }}</p>
-          <p class="text-white/50 text-xs">{{ store.currentTrack?.artist }}</p>
-        </div>
         <button 
           @click.stop="showLyricsSettings = true"
           class="w-10 h-10 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-colors"
@@ -484,6 +505,31 @@ watch(
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
         </button>
+      </div>
+
+      <!-- 歌曲信息头部 -->
+      <div class="flex items-center px-6 py-2 gap-4 flex-shrink-0 relative z-10 box-border w-full">
+         <div class="w-16 h-16 rounded-xl overflow-hidden bg-white/10 shadow-lg flex-shrink-0 relative">
+            <img 
+              v-if="store.currentTrack?.cover" 
+              :src="store.currentTrack.cover" 
+              class="w-full h-full object-cover"
+            />
+            <div v-else class="w-full h-full flex items-center justify-center bg-white/5 text-white/20">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+            </div>
+         </div>
+         <div class="flex-1 min-w-0 flex flex-col justify-center text-left">
+             <h2 class="text-white text-2xl font-bold truncate leading-tight tracking-tight">{{ store.currentTrack?.title || '未知歌曲' }}</h2>
+             <p class="text-white/60 text-base truncate mt-1 font-medium">{{ store.currentTrack?.artist || '未知歌手' }}</p>
+         </div>
+         <button 
+           @click.stop="handleToggle" 
+           class="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white backdrop-blur-md transition-all active:scale-95"
+         >
+            <svg v-if="store.isPlaying" class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+            <svg v-else class="w-6 h-6 ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+         </button>
       </div>
 
       <!-- 翻译错误提示 -->
@@ -497,7 +543,7 @@ watch(
           ref="lyricsScrollArea"
           :class="[
             'flex-1 w-full overflow-y-auto px-6 md:px-12 relative',
-            lyricsSettings.align === 'center' ? 'text-center' : 'text-left'
+            lyricsSettings.align === 'center' ? 'text-center' : 'text-left pl-8'
           ]"
           @scroll="handleLyricsScroll"
           @touchstart="handleLyricsTouchStart"
@@ -525,7 +571,7 @@ watch(
               v-for="(line, index) in lyrics"
               :key="index"
               :class="[
-                'transition-all duration-300 leading-relaxed py-2',
+                'transition-all duration-300 leading-relaxed py-3',
                 currentLyricIndex === index ? 'text-white' : isUserScrolling && seekingLyricIndex === index ? 'text-purple-400' : 'text-white/60'
               ]"
               :style="getLyricStyle(index)"
@@ -535,20 +581,31 @@ watch(
                 v-if="lyricsDisplayMode !== 'translated'"
                 :class="[
                   'transition-all',
-                  currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
-                  isUserScrolling && seekingLyricIndex === index ? 'text-lg font-medium' : ''
+                  currentLyricIndex === index ? 'text-3xl md:text-3xl font-bold mb-2' : 'text-lg md:text-xl font-medium mb-1',
+                  isUserScrolling && seekingLyricIndex === index ? 'text-2xl font-bold' : ''
                 ]"
               >
-                {{ line.text || '♪' }}
+                <template v-if="currentLyricIndex === index">
+                  <span 
+                    class="lyric-sweep"
+                    :style="{ 
+                      '--sweep-progress': `${currentLineProgress}%`,
+                      '--sweep-color': lyricsSettings.currentColor 
+                    }"
+                  >{{ line.text || '♪' }}</span>
+                </template>
+                <template v-else>
+                  {{ line.text || '♪' }}
+                </template>
               </p>
               <!-- 译文歌词 -->
               <p 
                 v-if="(lyricsDisplayMode === 'bilingual' || lyricsDisplayMode === 'translated') && translatedLyrics[index]?.text"
                 :class="[
                   'transition-all',
-                  lyricsDisplayMode === 'translated' && currentLyricIndex === index ? 'text-xl md:text-2xl font-bold' : '',
-                  lyricsDisplayMode === 'bilingual' ? 'text-sm mt-0.5 text-purple-300/60' : '',
-                  isUserScrolling && seekingLyricIndex === index && lyricsDisplayMode === 'translated' ? 'text-lg font-medium' : ''
+                  lyricsDisplayMode === 'translated' && currentLyricIndex === index ? 'text-3xl md:text-3xl font-bold' : '',
+                  lyricsDisplayMode === 'bilingual' ? 'text-base text-white/70' : '',
+                  isUserScrolling && seekingLyricIndex === index && lyricsDisplayMode === 'translated' ? 'text-2xl font-bold' : ''
                 ]"
               >
                 {{ translatedLyrics[index]?.text }}
@@ -817,5 +874,14 @@ watch(
 .slide-up-enter-active, .slide-up-leave-active { transition: all 0.3s ease; }
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
 
+.lyric-sweep {
+  background: linear-gradient(to right, var(--sweep-color) var(--sweep-progress), rgba(255, 255, 255, 0.5) var(--sweep-progress));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  transition: background 0.1s linear;
+}
+
 .pt-safe-top { padding-top: max(1rem, env(safe-area-inset-top, 1rem)); }
+
 </style>

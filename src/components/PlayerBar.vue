@@ -8,6 +8,7 @@ import { Capacitor } from '@capacitor/core'
 import { formatTime } from '@/utils/formatTime'
 import { parseLyrics, getCurrentLyricIndex } from '@/utils/parseLyrics'
 import { trackStorage } from '@/services/TrackStorage'
+import { behaviorService } from '@/services/BehaviorService'
 import CachedImage from '@/components/common/CachedImage.vue'
 import PlaylistPickerDialog from '@/components/common/PlaylistPickerDialog.vue'
 import EqualizerView from '@/components/EqualizerView.vue'
@@ -76,6 +77,42 @@ function handleCreatePlaylist() {
   }
   
   showPlaylistPicker.value = false
+}
+
+// 推荐反馈
+const currentFeedback = ref<'positive' | 'negative' | null>(null)
+const feedbackToast = ref({ show: false, message: '' })
+
+function updateCurrentFeedback() {
+  if (!store.currentTrack) {
+    currentFeedback.value = null
+    return
+  }
+  currentFeedback.value = behaviorService.getLatestFeedback(store.currentTrack.id)
+}
+
+function handleFeedbackLike() {
+  if (!store.currentTrack) return
+  
+  // 如果已经是正面反馈，再次点击取消 (Toggle behavior)
+  if (currentFeedback.value === 'positive') {
+    // 这里 BehaviorService 还没支持取消反馈，先记录一个新的中性行为或保持现状
+    // 根据用户要求 "这2个只能选一个"，我们实现互斥
+  }
+  
+  behaviorService.recordFeedback(store.currentTrack, true)
+  currentFeedback.value = 'positive'
+  feedbackToast.value = { show: true, message: '👍 已记录，会更多推荐类似歌曲' }
+  setTimeout(() => { feedbackToast.value.show = false }, 2000)
+}
+
+function handleFeedbackDislike() {
+  if (!store.currentTrack) return
+  
+  behaviorService.recordFeedback(store.currentTrack, false)
+  currentFeedback.value = 'negative'
+  feedbackToast.value = { show: true, message: '👎 已记录，会减少推荐类似歌曲' }
+  setTimeout(() => { feedbackToast.value.show = false }, 2000)
 }
 
 // Play mode text
@@ -209,6 +246,9 @@ watch(() => store.currentTrack, async (newTrack, oldTrack) => {
     
     // 检查缓存状态 (使用前端缓存追踪)
     store.checkAndSetCached()
+    
+    // 更新推荐反馈状态
+    updateCurrentFeedback()
   }
 }, { immediate: true, deep: false })
 
@@ -777,6 +817,32 @@ function clearPlaylist() {
         class="absolute inset-0 pt-[50vh] px-6 pb-[calc(2rem+env(safe-area-inset-bottom,20px))] flex flex-col items-center justify-start"
         :style="expandedControlStyle"
     >
+        <!-- Top Header for Expanded Player -->
+        <div class="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-50">
+          <!-- Collapse Button -->
+          <button 
+            @click.stop="toggleExpand"
+            class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center transition-all active:scale-95"
+          >
+            <svg class="w-6 h-6 text-white/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+          
+          <!-- EQ Button (moved to top right) -->
+          <button 
+            @click.stop="showEQ = true"
+            class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center transition-all active:scale-95"
+            title="均衡器"
+          >
+            <svg class="w-5 h-5 text-white/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="4" y="5" width="3" height="14" rx="1"/>
+              <rect x="10.5" y="8" width="3" height="11" rx="1"/>
+              <rect x="17" y="3" width="3" height="18" rx="1"/>
+            </svg>
+          </button>
+        </div>
+
         <!-- Song Info -->
         <div class="flex items-center justify-center gap-2 mt-5">
           <h2 class="text-2xl text-white font-bold text-center max-w-full truncate px-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.3)]">{{ store.currentTrack?.title }}</h2>
@@ -796,6 +862,34 @@ function clearPlaylist() {
           >
             <svg :class="['w-5 h-5 transition-colors', isFavorite ? 'text-red-500 fill-red-500' : 'text-white/60']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+            </svg>
+          </button>
+          
+          <!-- Feedback Like -->
+          <button 
+            @click.stop="handleFeedbackLike"
+            :class="[
+              'w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90',
+              currentFeedback === 'positive' ? 'bg-green-500/25 shadow-[0_0_12px_rgba(34,197,94,0.3)]' : 'bg-white/10 hover:bg-white/15'
+            ]"
+            title="推荐很准"
+          >
+            <svg :class="['w-5 h-5 transition-colors', currentFeedback === 'positive' ? 'text-green-400 fill-green-400' : 'text-white/60']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3zM7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/>
+            </svg>
+          </button>
+          
+          <!-- Feedback Dislike -->
+          <button 
+            @click.stop="handleFeedbackDislike"
+            :class="[
+              'w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90',
+              currentFeedback === 'negative' ? 'bg-red-500/25 shadow-[0_0_12px_rgba(239,68,68,0.3)]' : 'bg-white/10 hover:bg-white/15'
+            ]"
+            title="推荐不准"
+          >
+            <svg :class="['w-5 h-5 transition-colors', currentFeedback === 'negative' ? 'text-red-400 fill-red-400' : 'text-white/60']" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3zm7-13h3a2 2 0 012 2v7a2 2 0 01-2 2h-3"/>
             </svg>
           </button>
 
@@ -826,18 +920,6 @@ function clearPlaylist() {
             </svg>
           </div>
 
-          <!-- EQ Button -->
-          <button 
-            @click.stop="showEQ = true"
-            class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center transition-all active:scale-90"
-            title="均衡器"
-          >
-            <svg class="w-5 h-5 text-white/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <rect x="4" y="5" width="3" height="14" rx="1"/>
-              <rect x="10.5" y="8" width="3" height="11" rx="1"/>
-              <rect x="17" y="3" width="3" height="18" rx="1"/>
-            </svg>
-          </button>
         </div>
         
         <!-- Lyrics Display (2 lines) - 点击进入歌词页 -->

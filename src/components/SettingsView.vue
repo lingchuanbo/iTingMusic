@@ -4,7 +4,15 @@ import { Capacitor } from '@capacitor/core'
 import { usePlayerStore } from '@/store/player'
 import { useOfflineStore } from '@/store/offline'
 import { useEqualizerStore } from '@/store/equalizer'
-import type { AudioQuality, MusicSource } from '@/services/source/OnlineApiSource'
+import type { AudioQuality, MusicSource, ApiProviderType } from '@/services/source/OnlineApiSource'
+import {
+  getActiveProviderId,
+  setActiveProvider,
+  getAllProviders,
+  getActiveProvider,
+  getTuneHubApiKey,
+  setTuneHubApiKey
+} from '@/services/source/ApiProviders'
 import {
   loadAIConfig,
   saveAIConfig,
@@ -56,6 +64,31 @@ function updateDownloadSettings() {
   downloadPath.value = downloadService.getDownloadPathDescription()
 }
 
+// API 提供商设置
+const currentProviderId = ref<ApiProviderType>(getActiveProviderId())
+const allProviders = getAllProviders()
+
+// TuneHub API Key 设置
+const tuneHubApiKey = ref(getTuneHubApiKey())
+const showTuneHubApiKey = ref(false)
+
+function saveTuneHubApiKey() {
+  setTuneHubApiKey(tuneHubApiKey.value)
+}
+
+function selectProvider(id: ApiProviderType) {
+  currentProviderId.value = id
+  setActiveProvider(id)
+  // 更新启用的音乐源为当前 provider 支持的源
+  const provider = getActiveProvider()
+  const supported = provider.supportedPlatforms
+  enabledSources.value = enabledSources.value.filter(s => supported.includes(s))
+  if (enabledSources.value.length === 0) {
+    enabledSources.value = [supported[0]]
+  }
+  saveEnabledSources(enabledSources.value)
+}
+
 // 音乐源设置
 const MUSIC_SOURCES_KEY = 'enabled_music_sources'
 const allMusicSources: { value: MusicSource; label: string }[] = [
@@ -63,10 +96,11 @@ const allMusicSources: { value: MusicSource; label: string }[] = [
   { value: 'qq', label: 'QQ音乐' },
   { value: 'kuwo', label: '酷我音乐' },
   { value: 'kugou', label: '酷狗音乐' },
-  { value: 'migu', label: '咪咕音乐' }
+  { value: 'migu', label: '咪咕音乐' },
+  { value: 'joox', label: 'JOOX' }
 ]
 
-const defaultEnabledSources: MusicSource[] = ['netease', 'qq']
+const defaultEnabledSources: MusicSource[] = ['netease', 'qq', 'kuwo']
 
 function loadEnabledSources(): MusicSource[] {
   try {
@@ -122,6 +156,7 @@ async function loadCacheStats() {
     // Android: 使用 ExoPlayer 原生缓存统计
     const { nativeAudioPlayer } = await import('@/services/player/NativeAudioPlayer')
     const stats = await nativeAudioPlayer.getCacheStats()
+    console.log('[SettingsView] 原生缓存统计:', stats)
     cacheStats.value = { count: stats.count, totalSize: stats.sizeBytes }
   } else {
     // Web: 使用 IndexedDB 缓存
@@ -354,21 +389,73 @@ function toggleSection(section: string) {
             <path d="m6 9 6 6 6-6"/>
           </svg>
         </button>
-        <div v-show="expandedSections.has('sources')" class="px-4 pb-4">
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="s in allMusicSources"
-              :key="s.value"
-              @click="toggleSource(s.value)"
-              :class="[
-                'px-3 py-1.5 rounded-full text-sm transition-all',
-                enabledSources.includes(s.value) 
-                  ? 'bg-purple-500 text-white' 
-                  : 'bg-white/10 text-white/60 hover:bg-white/15'
-              ]"
-            >
-              {{ s.label }}
-            </button>
+        <div v-show="expandedSections.has('sources')" class="px-4 pb-4 space-y-4">
+          <!-- API 服务选择 -->
+          <div>
+            <p class="text-white/50 text-xs mb-2">API 服务</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="provider in allProviders"
+                :key="provider.id"
+                @click="selectProvider(provider.id)"
+                :class="[
+                  'px-3 py-1.5 rounded-full text-sm transition-all',
+                  currentProviderId === provider.id 
+                    ? 'bg-blue-500 text-white' 
+                    : 'bg-white/10 text-white/60 hover:bg-white/15'
+                ]"
+              >
+                {{ provider.name }}
+              </button>
+            </div>
+          </div>
+          
+          <!-- 音乐平台选择 -->
+          <div>
+            <p class="text-white/50 text-xs mb-2">音乐平台</p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="s in allMusicSources.filter(ms => getActiveProvider().supportedPlatforms.includes(ms.value))"
+                :key="s.value"
+                @click="toggleSource(s.value)"
+                :class="[
+                  'px-3 py-1.5 rounded-full text-sm transition-all',
+                  enabledSources.includes(s.value) 
+                    ? 'bg-purple-500 text-white' 
+                    : 'bg-white/10 text-white/60 hover:bg-white/15'
+                ]"
+              >
+                {{ s.label }}
+              </button>
+            </div>
+          </div>
+
+          <!-- TuneHub API Key (仅 TuneHub 时显示) -->
+          <div v-if="currentProviderId === 'sayqz'" class="pt-2 border-t border-white/10">
+            <p class="text-white/50 text-xs mb-2">TuneHub API Key</p>
+            <div class="relative">
+              <input
+                v-model="tuneHubApiKey"
+                :type="showTuneHubApiKey ? 'text' : 'password'"
+                placeholder="输入 API Key"
+                class="w-full h-10 px-3 pr-20 rounded-lg bg-white/10 text-white text-sm placeholder-white/30 outline-none focus:ring-1 focus:ring-purple-500 font-mono"
+                @change="saveTuneHubApiKey"
+              />
+              <button
+                @click="showTuneHubApiKey = !showTuneHubApiKey"
+                class="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/60"
+              >
+                <svg v-if="showTuneHubApiKey" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+                <svg v-else class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </button>
+            </div>
+            <p class="text-white/30 text-xs mt-1">默认 Key 可直接使用，也可替换为自己的 Key</p>
           </div>
         </div>
       </section>

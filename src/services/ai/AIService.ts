@@ -1,4 +1,5 @@
 // AI 服务配置
+import { nativeFetch } from '@/utils/nativeFetch'
 export interface AIConfig {
   provider: 'builtin' | 'custom'
   builtinId?: string // 内置AI的ID
@@ -64,7 +65,7 @@ export function loadAIConfig(): AIConfig {
       }
       return config
     }
-  } catch {}
+  } catch { }
   // 返回内置默认配置
   return { ...BUILTIN_AI_CONFIG }
 }
@@ -114,6 +115,7 @@ export interface AIRole {
   greeting: string // 打招呼语
   hostStyle: string // 主持风格
   customPrompt?: string // 自定义完整 prompt（可选）
+  iconPath: string // SVG path d attribute
 }
 
 export const AI_ROLES: AIRole[] = [
@@ -125,7 +127,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '温暖治愈、善于倾听、富有同理心，能透过简单的文字捕捉细腻情感',
     musicTaste: '涉猎广泛，从流行到古典、从华语到欧美都有深入了解，擅长给出最契合心境的音乐处方',
     greeting: '嗨！欢迎来到小乐的音乐诊所~告诉我你现在感觉怎么样？',
-    hostStyle: '先共情后推荐，用温暖有人味儿的话回应心情，让用户感受到被理解'
+    hostStyle: '先共情后推荐，用温暖有人味儿的话回应心情，让用户感受到被理解',
+    iconPath: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3'
   },
   {
     id: 'rocker',
@@ -135,7 +138,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '热血澎湃、真诚直接、崇尚自由与反叛精神，说话带劲儿',
     musicTaste: '专注摇滚、金属、朋克、另类，从Led Zeppelin到五月天，从Nirvana到万青，经典与独立都信手拈来',
     greeting: '摇滚不死！欢迎来到阿摇的地下电台，今天想来点什么硬核的？',
-    hostStyle: '像个摇滚老炮儿一样分享音乐，会讲乐队的故事、专辑的背景、现场的震撼，让人感受到摇滚的魅力和态度'
+    hostStyle: '像个摇滚老炮儿一样分享音乐，会讲乐队的故事、专辑的背景、现场的震撼，让人感受到摇滚的魅力和态度',
+    iconPath: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z M9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z M15 9a1 1 0 00-1 1v3a1 1 0 002 0v-3a1 1 0 00-1-1z'
   },
   {
     id: 'classical',
@@ -145,7 +149,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '优雅知性、温文尔雅、追求音乐的深度与美感，谈吐间透着文化底蕴',
     musicTaste: '精通古典音乐、交响乐、室内乐、歌剧，也欣赏新世纪音乐、电影原声和跨界古典',
     greeting: '音乐是灵魂的语言。欢迎来到雅音的古典时光，让我为你挑选一曲',
-    hostStyle: '像音乐学院的老师一样优雅地介绍作品，会讲作曲家的创作背景、乐曲的结构之美、演奏家的诠释特点'
+    hostStyle: '像音乐学院的老师一样优雅地介绍作品，会讲作曲家的创作背景、乐曲的结构之美、演奏家的诠释特点',
+    iconPath: 'M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z M9 10l12-3 M12 3v10.55c0 .596-.784 1.12-2 1.319C8.47 15.118 7 14.536 7 13.5c0-.9.9-1.7 2-1.93V3h3z'
   },
   {
     id: 'hipster',
@@ -155,7 +160,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '时尚前卫、活力四射、总是走在音乐潮流最前沿，说话带点潮流用语',
     musicTaste: '关注最新的流行音乐、电子音乐、说唱、R&B，喜欢推荐新晋艺人、热门单曲和病毒神曲',
     greeting: 'Yo！欢迎来到潮潮的音乐现场！最近有超多好听的新歌，准备好了吗？',
-    hostStyle: '像潮流博主一样分享音乐，会聊歌曲在社交媒体的热度、艺人的最新动态、为什么这首歌能火'
+    hostStyle: '像潮流博主一样分享音乐，会聊歌曲在社交媒体的热度、艺人的最新动态、为什么这首歌能火',
+    iconPath: 'M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636 M15.536 15.536a5 5 0 00-7.072-7.072m7.072 7.072a5 5 0 01-7.072-7.072m7.072 7.072L8.464 8.464'
   },
   {
     id: 'folk',
@@ -165,7 +171,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '文艺温柔、细腻敏感、喜欢讲故事，说话慢条斯理带着诗意',
     musicTaste: '热爱民谣、独立音乐、原创歌手，从Bob Dylan到李志，从陈绮贞到房东的猫，喜欢有故事感和诗意的歌曲',
     greeting: '来杯咖啡，听首民谣。欢迎来到阿民的深夜电台，慢慢聊~',
-    hostStyle: '像文艺青年一样分享音乐，会讲歌词背后的故事、创作者的心路历程、为什么这首歌能触动人心'
+    hostStyle: '像文艺青年一样分享音乐，会讲歌词背后的故事、创作者的心路历程、为什么这首歌能触动人心',
+    iconPath: 'M12 19l9 2-9-18-9 18 9-2zm0 0v-8'
   },
   {
     id: 'retro',
@@ -175,7 +182,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '怀旧温情、阅历丰富、珍藏着每个年代的经典，说话带着岁月的温度',
     musicTaste: '专注80、90、00年代的经典老歌，华语金曲、欧美经典、日韩流行都如数家珍',
     greeting: '经典永不过时。欢迎来到怀旧的时光电台，让我带你重温那些年的旋律',
-    hostStyle: '像老朋友一样分享回忆，会讲那个年代的故事、歌曲流行时的场景、为什么这些歌能成为经典'
+    hostStyle: '像老朋友一样分享回忆，会讲那个年代的故事、歌曲流行时的场景、为什么这些歌能成为经典',
+    iconPath: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z'
   },
   {
     id: 'chill',
@@ -185,7 +193,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '温柔治愈、声音轻柔、擅长营造氛围，说话像轻轻的晚风',
     musicTaste: '专注轻音乐、氛围音乐、Lo-fi、助眠音乐、自然白噪音，适合放松、冥想、入睡',
     greeting: '深呼吸...欢迎来到慢慢的治愈电台，让音乐带走你的疲惫',
-    hostStyle: '像ASMR主播一样轻声细语，会描述音乐营造的氛围、适合的场景、如何帮助放松身心'
+    hostStyle: '像ASMR主播一样轻声细语，会描述音乐营造的氛围、适合的场景、如何帮助放松身心',
+    iconPath: 'M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z'
   },
   {
     id: 'party',
@@ -195,7 +204,8 @@ export const AI_ROLES: AIRole[] = [
     personality: '活力四射、永远充满能量、说话带感，让人忍不住想跟着嗨',
     musicTaste: '专注电子舞曲、EDM、House、Techno、派对音乐，从Avicii到Martin Garrix都是心头好',
     greeting: '准备好嗨了吗？欢迎来到DJ小嗨的派对电台！Let\'s party! 🎉',
-    hostStyle: '像夜店DJ一样带动气氛，会介绍歌曲的BPM、drop的精彩之处、适合什么样的派对场景'
+    hostStyle: '像夜店DJ一样带动气氛，会介绍歌曲的BPM、drop的精彩之处、适合什么样的派对场景',
+    iconPath: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4'
   }
 ]
 
@@ -238,7 +248,7 @@ export function loadPreferences(): AIPreferences {
     if (data) {
       return { ...defaultPreferences, ...JSON.parse(data) }
     }
-  } catch {}
+  } catch { }
   return { ...defaultPreferences }
 }
 
@@ -576,7 +586,7 @@ export async function getAIRecommendations(
         ? { 'api-key': config.apiKey }
         : { Authorization: `Bearer ${config.apiKey}` }
 
-    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    const response = await nativeFetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -631,14 +641,14 @@ export async function getAIRecommendations(
           reader.cancel()
           throw new Error('AI 响应超时，请重试')
         }
-        
+
         const { done, value } = await Promise.race([
           reader.read(),
-          new Promise<never>((_, reject) => 
+          new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('读取超时')), 30000)
           )
         ])
-        
+
         if (done) break
         lastActivityTime = Date.now()
 
@@ -682,7 +692,7 @@ export async function getAIRecommendations(
       if (char === '\n' || char === '\r' || char === '\t') return char
       return ''
     })
-    
+
     // 移除 JSON 前后的非 JSON 文本（更严格的提取）
     const jsonStartIdx = jsonStr.indexOf('{')
     const jsonEndIdx = jsonStr.lastIndexOf('}')
@@ -697,7 +707,7 @@ export async function getAIRecommendations(
         jsonStr = fullContent.substring(originalJsonStart, originalJsonEnd + 1)
       }
     }
-    
+
     // 修复尾部逗号问题（数组或对象最后一个元素后的逗号）
     jsonStr = jsonStr.replace(/,(\s*[}\]])/g, '$1')
     // 修复缺少逗号的问题（对象属性之间）
@@ -718,18 +728,18 @@ export async function getAIRecommendations(
       console.warn('JSON 解析失败，尝试正则提取:', parseError.message, '\n原始内容:', jsonStr.substring(0, 200))
       // 尝试用更宽松的正则提取歌曲信息
       const songs: { title: string; artist: string; category?: string; comment?: string }[] = []
-      
+
       // 方法1: 完整格式（包含 category 和 comment）- 更宽松的匹配
       const songPattern1 = /"title"\s*:\s*"([^"]+)"/g
       const artistPattern = /"artist"\s*:\s*"([^"]+)"/g
       const categoryPattern = /"category"\s*:\s*"([^"]+)"/g
       const commentPattern = /"comment"\s*:\s*"([^"]+)"/g
-      
+
       const titles = [...fullContent.matchAll(songPattern1)].map(m => m[1])
       const artists = [...fullContent.matchAll(artistPattern)].map(m => m[1])
       const categories = [...fullContent.matchAll(categoryPattern)].map(m => m[1])
       const comments = [...fullContent.matchAll(commentPattern)].map(m => m[1])
-      
+
       for (let i = 0; i < Math.min(titles.length, artists.length); i++) {
         songs.push({
           title: titles[i],
@@ -738,7 +748,7 @@ export async function getAIRecommendations(
           comment: comments[i] || ''
         })
       }
-      
+
       // 方法2: 从原始文本中提取《歌名》- 歌手 格式
       if (songs.length === 0) {
         const lineMatches = fullContent.matchAll(/[《「""]([^》」""]+)[》」""]?\s*[-—:：]\s*([^\n,，》」""]+)/g)
@@ -750,7 +760,7 @@ export async function getAIRecommendations(
           }
         }
       }
-      
+
       // 方法3: 匹配 **《歌名》** - 歌手 格式
       if (songs.length === 0) {
         const boldMatches = fullContent.matchAll(/\*\*[《「]([^》」]+)[》」]\*\*\s*[-—]\s*([^\n]+)/g)
@@ -758,7 +768,7 @@ export async function getAIRecommendations(
           songs.push({ title: m[1].trim(), artist: m[2].trim() })
         }
       }
-      
+
       // 提取 reason
       let reason = ''
       const reasonMatch = fullContent.match(/"reason"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/)
@@ -771,7 +781,7 @@ export async function getAIRecommendations(
           reason = emotionMatch[1]
         }
       }
-      
+
       if (songs.length > 0) {
         result = { songs, reason }
       } else {
@@ -788,7 +798,7 @@ export async function getAIRecommendations(
       })),
       reason: result.reason || ''
     }
-    
+
     callbacks?.onComplete?.(finalResult)
     return finalResult
   } catch (error: any) {
@@ -819,7 +829,7 @@ export async function getAIRecommendationsSync(
       ? { 'api-key': config.apiKey }
       : { Authorization: `Bearer ${config.apiKey}` }
 
-  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+  const response = await nativeFetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -855,4 +865,78 @@ export async function getAIRecommendationsSync(
 export function isAIConfigured(): boolean {
   const config = loadAIConfig()
   return !!(config.apiKey && config.baseUrl && config.model)
+}
+
+/**
+ * 智能分析歌曲元数据
+ * 识别流派、年代、标签、情绪等
+ */
+export async function analyzeTrackMetadata(
+  title: string,
+  artist: string
+): Promise<{
+  genre: string
+  era: string
+  tags: string[]
+  mood: string
+} | null> {
+  const config = loadAIConfig()
+  if (!config.apiKey) return null
+
+  const prompt = `分析歌曲《${title}》- ${artist}。
+你的目标是为音乐推荐系统提供精准的分类数据。
+请返回严格的 JSON 格式（不要包含任何 markdown 代码块标识）：
+{
+  "genre": "流派（如：古风、CityPop、摇滚、嘻哈、电子、民谣等，尽量精准）",
+  "era": "年代（如：80年代、90年代、00年代、10年代、20年代）",
+  "tags": ["核心风格标签1", "标签2", "标签3"],
+  "mood": "情绪（如：忧伤、壮烈、轻快、宁静、热血等）"
+}
+如果信息不足，请基于你的知识库进行最合理的推测。不要返回未知。`
+
+  try {
+    const authHeaders: Record<string, string> =
+      config.authType === 'api-key'
+        ? { 'api-key': config.apiKey }
+        : { Authorization: `Bearer ${config.apiKey}` }
+
+    const response = await nativeFetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: 'system', content: '你是一个资深的音乐库分类专家，精通全球及华语乐坛历史，对各种细分流派有深刻理解。' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.3, // 低随机性确保分类稳定
+        max_tokens: 300
+      })
+    })
+
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const content = data.choices?.[0]?.message?.content
+    if (!content) return null
+
+    // 清理可能存在的 markdown 标识
+    let jsonStr = content.trim()
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/)
+    if (jsonMatch) jsonStr = jsonMatch[1].trim()
+
+    const result = JSON.parse(jsonStr)
+    return {
+      genre: result.genre || '流行',
+      era: result.era || '未知',
+      tags: result.tags || [],
+      mood: result.mood || '中性'
+    }
+  } catch (e) {
+    console.error('AI 元数据分析失败:', e)
+    return null
+  }
 }

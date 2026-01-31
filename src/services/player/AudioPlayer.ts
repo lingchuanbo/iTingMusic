@@ -6,7 +6,9 @@ import { audioCache } from '@/services/cache/AudioCache'
 import { backgroundMode } from '@/services/player/BackgroundMode'
 import { equalizerService } from '@/services/player/EqualizerService'
 import { nativeAudioPlayer } from '@/services/player/NativeAudioPlayer'
-import { getActualMusicUrl, type MusicSource } from '@/services/source/OnlineApiSource'
+import { getActualMusicUrl, searchResultToTrackAsync, type MusicSource } from '@/services/source/OnlineApiSource'
+import { searchAndMatch } from '@/utils/songMatcher'
+import { getActiveProvider } from '@/services/source/ApiProviders'
 import type { Track } from '@/types'
 
 // 扩展 Track 类型
@@ -22,6 +24,8 @@ class AudioPlayer {
   private useExoPlayer: boolean = false // 使用原生 ExoPlayer
   private errorCount: number = 0
   private maxErrors: number = 3
+  private retryCount: number = 0
+  private maxRetries: number = 2  // 每首歌最多重试次数
   private controlCallbackSetup: boolean = false
 
   constructor() {
@@ -129,12 +133,48 @@ class AudioPlayer {
    */
   resetErrorCount() {
     this.errorCount = 0
+    this.retryCount = 0
   }
 
   /**
-   * 处理播放错误，防止无限循环切歌
+   * 处理播放错误：通过歌曲名+艺人重新搜索匹配，获取新的URL
    */
-  private handlePlayError(store: ReturnType<typeof usePlayerStore>) {
+  private async handlePlayError(store: ReturnType<typeof usePlayerStore>) {
+    const track = store.currentTrack
+
+    // 先尝试重新搜索匹配当前歌曲
+    if (this.retryCount < this.maxRetries && track) {
+      this.retryCount++
+      console.log(`AudioPlayer: 播放失败，通过歌名+艺人重新搜索 (${this.retryCount}/${this.maxRetries})`)
+
+      try {
+        // 使用当前 API 服务支持的平台重新搜索
+        const provider = getActiveProvider()
+        const sources = provider.supportedPlatforms.slice(0, 3) as MusicSource[] // 取前3个平台
+
+        const match = await searchAndMatch(track.title, track.artist, sources)
+
+        if (match) {
+          console.log(`AudioPlayer: 重新匹配成功: ${match.name} - ${match.artist} (${match.platform})`)
+          // 创建新的 track 并替换当前播放
+          const newTrack = await searchResultToTrackAsync(match)
+          // 更新当前 track 的 URL 和平台信息
+          const onlineTrack = track as OnlineTrack
+          onlineTrack._platform = match.platform as MusicSource
+          onlineTrack._songId = match.id
+          onlineTrack.url = newTrack.url
+          onlineTrack.cover = newTrack.cover || track.cover
+          // 重新播放
+          this.play(newTrack.url, track)
+          return
+        }
+      } catch (e) {
+        console.warn('AudioPlayer: 重新搜索匹配失败:', e)
+      }
+    }
+
+    // 重试次数用完或搜索失败，重置重试计数并增加错误计数
+    this.retryCount = 0
     this.errorCount++
 
     if (this.errorCount >= this.maxErrors) {
@@ -144,6 +184,7 @@ class AudioPlayer {
       return
     }
 
+    console.log(`AudioPlayer: 重试失败，切换下一首 (${this.errorCount}/${this.maxErrors})`)
     // 延迟切换下一首
     setTimeout(() => {
       store.nextTrack()

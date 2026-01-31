@@ -4,6 +4,8 @@ import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { Capacitor } from '@capacitor/core'
 import { nativeAudioPlayer } from '@/services/player/NativeAudioPlayer'
+import { behaviorService } from '@/services/BehaviorService'
+import { trackStorage } from '@/services/TrackStorage'
 import Sidebar from '@/components/Sidebar.vue'
 import SearchBar from '@/components/SearchBar.vue'
 import SongList from '@/components/SongList.vue'
@@ -18,6 +20,7 @@ import LocalView from '@/components/LocalView.vue'
 import OfflineView from '@/components/OfflineView.vue'
 import SettingsView from '@/components/SettingsView.vue'
 import MobileNav from '@/components/MobileNav.vue'
+import RecommendView from '@/components/RecommendView.vue'
 import HomeView from '@/components/HomeView.vue'
 
 const store = usePlayerStore()
@@ -26,7 +29,7 @@ const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
 // 处理原生返回键
 let backButtonListener: any = null
-import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer, isModalOpen } from '@/store/ui'
+import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer, isModalOpen, isRandomListenOpen } from '@/store/ui'
 
 
 onMounted(async () => {
@@ -64,7 +67,7 @@ onMounted(async () => {
           return
         }
         
-        // 优先级 6: 在首页时退出应用
+        // 优先级 6: 在AI选歌页时退出应用
         CapApp.exitApp()
       })
     } catch (e) {
@@ -105,11 +108,11 @@ const showGlobalSearch = computed(() =>
 )
 
 
-// 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏）
-const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value)
+// 是否显示播放栏（搜索弹窗打开时隐藏，AI全屏时隐藏，随便听听时隐藏）
+const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value && !isRandomListenOpen.value)
 
-// 是否显示底部导航（搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏）
-const showMobileNav = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value)
+// 是否显示底部导航（搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏，随便听听时隐藏）
+const showMobileNav = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value && !isRandomListenOpen.value)
 
 // 动态背景
 const bgStyle = computed(() => {
@@ -126,6 +129,11 @@ const bgStyle = computed(() => {
 watch(() => store.playVersion, () => {
   const track = store.currentTrack
   if (track) {
+    // 记录播放开始行为
+    behaviorService.recordPlayStart(track)
+    // 保存歌曲信息到存储
+    trackStorage.saveTrack(track)
+    // 播放
     audioPlayer.play(track.url, track)
   }
 })
@@ -142,17 +150,30 @@ watch(() => store.playMode, (mode) => {
   }
 })
 
-function handleNavigate(id: string) {
-  activeView.value = id
-}
+// 提供给子组件使用
+provide('openGlobalSearch', openGlobalSearch)
 
 // 打开全局搜索
 function openGlobalSearch() {
   searchBarRef.value?.openMobileSearch()
 }
 
-// 提供给子组件使用
-provide('openGlobalSearch', openGlobalSearch)
+// AI选歌页面引用
+const aiPickerRef = ref<any>(null)
+
+function handleNavigate(id: string) {
+  if (id === 'random-listen') {
+    activeView.value = 'aipicker'
+    // 延迟一点确保组件已挂载并更新
+    setTimeout(() => {
+      if (aiPickerRef.value) {
+        aiPickerRef.value.showRandomListenView = true
+      }
+    }, 100)
+    return
+  }
+  activeView.value = id
+}
 </script>
 
 <template>
@@ -171,19 +192,26 @@ provide('openGlobalSearch', openGlobalSearch)
       <Sidebar :active-view="activeView" @navigate="handleNavigate" class="hidden md:flex" />
 
       <!-- 主内容区 - 移动端需要为底部导航+播放栏留出空间，顶部需要安全区域间距 -->
-      <main :class="['flex-1 flex flex-col overflow-hidden md:pb-14 pt-safe-top md:pt-0', aiPickerFullscreen ? 'pb-0' : 'mobile-main-content']">
-        <!-- 首页：推荐内容 -->
-        <template v-if="activeView === 'home'">
-          <HomeView @navigate="handleNavigate" />
-        </template>
+       <main :class="['flex-1 flex flex-col overflow-hidden md:pb-14 pt-safe-top md:pt-0', aiPickerFullscreen ? 'pb-0' : 'mobile-main-content']">
+        <!-- 首页 -->
+        <HomeView v-if="activeView === 'home'" @navigate="handleNavigate" />
+
+        <!-- AI选歌 -->
+        <AIPickerView 
+          v-else-if="activeView === 'aipicker'" 
+          ref="aiPickerRef"
+          @fullscreen="aiPickerFullscreen = $event" 
+        />
+
+        <!-- 推荐页 -->
+        <RecommendView v-else-if="activeView === 'recommend'" />
 
         <!-- 播放列表 -->
         <template v-else-if="activeView === 'playlist'">
           <SongList />
         </template>
 
-        <!-- AI 选歌 -->
-        <AIPickerView v-else-if="activeView === 'aipicker'" @fullscreen="aiPickerFullscreen = $event" />
+
 
         <!-- 排行榜 -->
         <ToplistView v-else-if="activeView === 'toplist'" />

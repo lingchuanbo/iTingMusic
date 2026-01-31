@@ -263,13 +263,42 @@ class NativeAudioPlayer {
             this.listeners.push(trackListener)
             console.log('NativeAudioPlayer: onTrackChange 注册成功')
 
-            // 5. 错误监听
+            // 5. 错误监听 - 智能重试机制
             console.log('NativeAudioPlayer: 正在注册 onError...')
-            const errorListener = await NativeExoPlayer.addListener('onError', (data) => {
+            const errorListener = await NativeExoPlayer.addListener('onError', async (data) => {
                 console.error('NativeAudioPlayer: [EVENT] 播放错误', data.code, data.message)
                 logger.error(`[onError] 播放错误: ${data.code} - ${data.message}`)
                 const store = usePlayerStore()
                 store.isPlaying = false
+
+                // 智能重试：尝试刷新 URL 并重新播放
+                const currentTrack = store.playlist[store.currentIndex] as any
+                if (currentTrack && currentTrack._platform && currentTrack._songId) {
+                    logger.info(`[onError] 尝试刷新 URL 并重试: ${currentTrack.title}`)
+                    try {
+                        const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
+                        const newUrl = await getActualMusicUrl(currentTrack._platform, currentTrack._songId)
+
+                        if (newUrl) {
+                            logger.info(`[onError] 获取到新 URL，重试播放`)
+                            await NativeExoPlayer.play({
+                                url: newUrl,
+                                id: currentTrack.id,
+                                title: currentTrack.title,
+                                artist: currentTrack.artist,
+                                cover: currentTrack.cover
+                            })
+                            store.isPlaying = true
+                            logger.info(`[onError] 重试成功`)
+                            return // 重试成功，不跳下一首
+                        }
+                    } catch (retryError) {
+                        logger.error(`[onError] 重试失败: ${retryError}`)
+                    }
+                }
+
+                // 重试失败或非在线歌曲，跳到下一首
+                logger.info(`[onError] 跳到下一首`)
                 setTimeout(() => store.nextTrack(), 1000)
             })
             this.listeners.push(errorListener)

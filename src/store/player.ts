@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { Track, PlayMode } from '@/types'
 import { audioCache } from '@/services/cache/AudioCache'
+import { trackStorage } from '@/services/TrackStorage'
 
 const STORAGE_KEY = 'zen_player_data'
 const CACHED_URLS_KEY = 'zen_cached_urls'
@@ -120,6 +121,8 @@ export const usePlayerStore = defineStore('player', () => {
     if (!exists) {
       playlist.value.push(track)
     }
+    // 保存歌曲信息到 trackStorage，供离线缓存匹配使用
+    trackStorage.saveTrack(track)
   }
 
   function playTrack(index: number) {
@@ -129,6 +132,11 @@ export const usePlayerStore = defineStore('player', () => {
       duration.value = 0
       // 更新索引
       currentIndex.value = index
+      // 保存歌曲信息到 trackStorage，供离线缓存匹配使用
+      const track = playlist.value[index]
+      if (track) {
+        trackStorage.saveTrack(track)
+      }
       // 立即检查缓存状态
       checkAndSetCached()
       // 增加版本号强制触发播放（即使是同一首歌）
