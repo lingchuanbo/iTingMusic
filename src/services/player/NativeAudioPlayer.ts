@@ -585,12 +585,28 @@ class NativeAudioPlayer {
         if (!nextTrack) return
 
         try {
-            // 获取下一首的实际 URL
+            // 获取下一首的实际 URL - 先检查缓存
             let nextUrl: string | null = null
-            if (nextTrack._platform && nextTrack._songId) {
+            const cachedUrl = store.getCachedAudioUrl(nextTrack.id)
+
+            // 验证 ExoPlayer 原生缓存是否存在
+            if (cachedUrl) {
+                const nativeCached = await this.isCached(cachedUrl)
+                if (nativeCached) {
+                    console.log('NativeAudioPlayer: 预加载使用缓存 URL:', nextTrack.id)
+                    nextUrl = cachedUrl
+                }
+            }
+
+            // 无有效缓存时请求 API
+            if (!nextUrl && nextTrack._platform && nextTrack._songId) {
+                console.log('NativeAudioPlayer: 预加载请求 API:', nextTrack.id)
                 const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
                 nextUrl = await getActualMusicUrl(nextTrack._platform, nextTrack._songId)
-            } else {
+                if (nextUrl) {
+                    store.saveCachedAudioUrl(nextTrack.id, nextUrl)
+                }
+            } else if (!nextUrl) {
                 nextUrl = nextTrack.url
             }
 

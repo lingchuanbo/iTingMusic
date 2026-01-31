@@ -217,12 +217,28 @@ class AudioPlayer {
     if (!nextTrack) return
 
     try {
-      // 获取下一首的实际 URL
+      // 获取下一首的实际 URL - 先检查缓存
       let nextUrl: string | null = null
-      if (nextTrack._platform && nextTrack._songId) {
+      const cachedUrl = store.getCachedAudioUrl(nextTrack.id)
+
+      // 验证 ExoPlayer 原生缓存是否存在
+      if (cachedUrl) {
+        const nativeCached = await nativeAudioPlayer.isCached(cachedUrl)
+        if (nativeCached) {
+          console.log('AudioPlayer: 预加载使用缓存 URL:', nextTrack.id)
+          nextUrl = cachedUrl
+        }
+      }
+
+      // 无有效缓存时请求 API
+      if (!nextUrl && nextTrack._platform && nextTrack._songId) {
+        console.log('AudioPlayer: 预加载请求 API:', nextTrack.id)
         const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
         nextUrl = await getActualMusicUrl(nextTrack._platform, nextTrack._songId)
-      } else {
+        if (nextUrl) {
+          store.saveCachedAudioUrl(nextTrack.id, nextUrl)
+        }
+      } else if (!nextUrl) {
         nextUrl = nextTrack.url
       }
 
@@ -257,33 +273,44 @@ class AudioPlayer {
       try {
         // ExoPlayer 不能使用 blob 缓存，需要直接使用 HTTP URL
         if (this.useExoPlayer) {
-          // Android ExoPlayer: 使用前端记录的 ID-URL 映射复用已缓存的 URL
-          if (onlineTrack._platform && onlineTrack._songId) {
-            // 先检查前端是否记录了该歌曲的缓存 URL
-            const cachedAudioUrl = store.getCachedAudioUrl(track.id)
+          // 先检查前端是否记录了该歌曲的缓存 URL
+          const cachedAudioUrl = store.getCachedAudioUrl(track.id)
+          console.log('AudioPlayer: [Android] track.id:', track.id, 'cachedUrl:', cachedAudioUrl ? '有' : '无')
 
-            if (cachedAudioUrl) {
-              // 有缓存记录：使用记录的 URL，ExoPlayer 会从缓存读取
-              console.log('AudioPlayer: 使用缓存 URL，跳过 API 请求:', track.id)
-              playUrl = cachedAudioUrl
-              store.setCached(true)
-              store.setBuffered(100)
+          // 如果有缓存 URL，验证 ExoPlayer 原生缓存是否存在
+          let useCache = false
+          if (cachedAudioUrl) {
+            const nativeCached = await nativeAudioPlayer.isCached(cachedAudioUrl)
+            console.log('AudioPlayer: ExoPlayer 原生缓存:', nativeCached ? '命中' : '未命中')
+            useCache = nativeCached
+          }
+
+          if (useCache && cachedAudioUrl) {
+            // ExoPlayer 原生缓存存在：使用缓存 URL
+            console.log('AudioPlayer: 使用缓存 URL，跳过 API 请求:', track.id)
+            playUrl = cachedAudioUrl
+            store.setCached(true)
+            store.setBuffered(100)
+          } else if (onlineTrack._platform && onlineTrack._songId) {
+            // 无有效缓存：请求 API 获取新 URL
+            console.log('AudioPlayer: 请求 API:', track.id)
+            store.setCached(false)
+            store.setBuffered(0)
+            const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
+            if (actualUrl) {
+              playUrl = actualUrl
+              // 保存新 URL 到前端缓存映射
+              store.saveCachedAudioUrl(track.id, actualUrl)
             } else {
-              // 无缓存：请求 API 获取新 URL
-              console.log('AudioPlayer: 无缓存记录，请求 API:', track.id)
-              store.setCached(false)
-              store.setBuffered(0)
-              const actualUrl = await getActualMusicUrl(onlineTrack._platform, onlineTrack._songId)
-              if (actualUrl) {
-                playUrl = actualUrl
-                // 保存 URL 到前端缓存映射，下次播放时可复用
-                store.saveCachedAudioUrl(track.id, actualUrl)
-              } else {
-                console.error('无法获取音频URL')
-                this.handlePlayError(store)
-                return
-              }
+              console.error('无法获取音频URL')
+              this.handlePlayError(store)
+              return
             }
+          } else {
+            // 无平台信息：使用传入的 URL
+            console.log('AudioPlayer: 无平台信息，使用传入URL')
+            store.setCached(false)
+            store.setBuffered(0)
           }
         } else {
           // Web 端: 优先使用 blob 缓存
