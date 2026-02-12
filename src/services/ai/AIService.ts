@@ -7,6 +7,9 @@ export interface AIConfig {
   baseUrl: string
   model: string
   authType?: 'bearer' | 'api-key' // 认证方式，默认 bearer
+  // Exa 搜索配置
+  exaApiKey?: string
+  exaEnabled?: boolean
 }
 
 // 内置AI配置定义
@@ -414,6 +417,7 @@ ${hasLanguagePref ? `- 【语言限制是铁律】用户已明确设置语言偏
 2. **多维推荐**：推荐 8-12 首歌曲，分成 3-4 个类别，每首歌都要有推荐理由
 3. **严格遵守语言偏好**：${hasLanguagePref ? '【铁律】所有推荐必须100%是用户指定语言的歌曲！' : '根据用户的情绪和场景，混合推荐不同风格的歌曲。'}
 4. **追求新鲜感**：每次推荐都要像是精心策划的惊喜
+5. **实时优先原则**：如果系统提供了【实时联网搜索内容】，**必须优先**从中选取当前最流行或最符合描述的歌曲！此时请放下"避免推荐烂大街"的规则，以提供准确的实时榜单为第一要务。
 
 ## Workflow
 1. **接收输入**：用户描述状态或场景
@@ -456,6 +460,7 @@ ${hasLanguagePref ? `- 【语言限制是铁律】用户已明确设置语言偏
 - 🌙 深夜自我对话
 - ✨ 重燃希望治愈组
 - 🎸 找回真我态度组
+- 🏆 实时热听排行榜 (基于搜索结果)
 
 ## 点评风格示例（要有心理洞察）
 不要说"节奏欢快"，要说"这首歌能直接激活你的多巴胺！"
@@ -532,8 +537,9 @@ ${hasLanguagePref ? '- 【铁律】严格遵守用户的语言偏好，所有推
 3. 每首歌的 comment 要生动有趣，说明为什么推荐
 4. ${hasLanguagePref ? '【铁律-违反即失败】所有推荐的歌曲必须是用户指定语言的！如果用户选择了华语，每一首歌都必须是中文歌，不能有任何英文、日文、韩文歌曲！' : '尽量推荐知名度高、容易搜索到的歌曲'}
 5. **追求新鲜感**：不要总是推荐那些"万能歌曲"，要精准匹配用户情绪，带来惊喜
-6. 只返回 JSON，不要有其他文字
-7. reason 字段必须有内容，要有温度地回应用户`
+6. **实时优先原则**：如果系统提供了【实时联网搜索内容】，请将其作为"第一手资料"进行分析和推荐。当用户询问榜单或实时讯息时，请以准确性为重，放下"避免热门"的限制。
+7. 只返回 JSON，不要有其他文字
+8. reason 字段必须有内容，要有温度地回应用户`
 }
 
 // 流式回调类型
@@ -541,6 +547,67 @@ export interface StreamCallbacks {
   onThinking?: (text: string) => void
   onComplete?: (result: { songs: { title: string; artist: string }[]; reason: string }) => void
   onError?: (error: string) => void
+}
+
+/**
+ * Exa 搜索接口定义
+ */
+interface ExaSearchResult {
+  title: string
+  url: string
+  text?: string
+  publishedDate?: string
+  author?: string
+  score?: number
+}
+
+/**
+ * 执行 Exa 搜索获取联网信息
+ */
+export async function exaSearch(query: string, apiKey: string): Promise<string> {
+  console.log('[Exa Search] Searching for:', query)
+  try {
+    const response = await nativeFetch('https://api.exa.ai/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey
+      },
+      body: {
+        query: query,
+        useAutoprompt: true,
+        numResults: 10,
+        text: true,
+        highlights: true
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.text()
+      console.warn('[Exa Search] API error:', response.status, errorData)
+      return `[警告] 联网搜索失败 (状态码 ${response.status})，请仅依据你的内置知识库回答，但请诚实说明无法获取 2026 年的实时信息。`
+    }
+
+    const data = await response.json()
+    const results = data.results as (ExaSearchResult & { highlights?: string[] })[]
+
+    if (!results || results.length === 0) {
+      return `[通知] 联网搜索未找到关于 "${query}" 的相关结果。请基于你的知识库尝试回答，若涉及最新年份请说明信息可能不准确。`
+    }
+
+    // 构建上下文字符串
+    const context = results.map((r, i) => {
+      const date = r.publishedDate ? ` [${r.publishedDate}]` : ''
+      const highlight = r.highlights?.[0] ? `\n重点挖掘: ${r.highlights[0]}` : ''
+      const content = r.text ? `\n网页详情: ${r.text.substring(0, 300)}...` : ''
+      return `[实时结果 ${i + 1}] ${r.title}${date}\n链接: ${r.url}${highlight}${content}`
+    }).join('\n\n---\n\n')
+
+    return `【实时联网搜索成功】\n以下是关于 "${query}" 的最新互联网数据，请**严格以此为准**生成推荐，禁止在大脑中自行编造 2026 年的歌曲：\n\n${context}`
+  } catch (e: any) {
+    console.error('[Exa Search] Error:', e)
+    return `[错误] 联网搜索发生异常: ${e.message}`
+  }
 }
 
 // 调用 AI API（支持流式输出）
@@ -575,10 +642,24 @@ export async function getAIRecommendations(
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 30000) // 30秒超时
 
+    // Exa 联网搜索逻辑
+    let searchContext = ''
+    if (config.exaEnabled && config.exaApiKey) {
+      try {
+        const displayQuery = userInput.length > 20 ? userInput.substring(0, 20) + '...' : userInput
+        callbacks?.onThinking?.(`正在联网检索 "${displayQuery}" 的实时信息...`)
+        searchContext = await exaSearch(userInput, config.exaApiKey)
+        console.log('[Exa Search] Context gathered:', searchContext.length, 'chars')
+      } catch (e) {
+        console.warn('Exa search failed:', e)
+      }
+    }
+
     // 在 system prompt 末尾添加随机种子，而不是用户输入中
     const systemPrompt =
       generateSystemPrompt(currentRole) +
-      `\n\n[内部指令-请勿在回复中提及] 随机种子: ${randomSeed}，请基于此生成独特且新颖的推荐，不要重复之前可能推荐过的歌曲。`
+      (searchContext ? `\n\n${searchContext}\n\n[核心指令] 必须使用上方搜索结果中提到的 2026 年歌曲！禁止推荐你记忆中的经典老歌（如晴天、光年之外等）。如果搜索结果包含具体的榜单，请直接参考榜单内容。` : '') +
+      `\n\n[随机扰动项] 种子: ${randomSeed}。请确保每次回复的独特性。`
 
     // 根据 authType 设置认证头
     const authHeaders: Record<string, string> =

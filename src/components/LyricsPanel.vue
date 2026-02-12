@@ -18,21 +18,61 @@ import {
 } from '@/services/ai/LyricsTranslator'
 import { isAIConfigured } from '@/services/ai/AIService'
 import { interpretLyrics, type InterpretationResult } from '@/services/ai/LyricsInterpreter'
+import { ttsManager } from '@/services/ai/TTSManager'
+import CachedImage from '@/components/common/CachedImage.vue'
+import { imageCache } from '@/services/ImageCache'
 
 const store = usePlayerStore()
 
+// 解析封面 URL（用于背景图）
+const cachedCoverUrl = ref('')
+watch(
+  () => store.currentTrack?.cover,
+  async (cover) => {
+    if (!cover) {
+      cachedCoverUrl.value = ''
+      return
+    }
+    try {
+      cachedCoverUrl.value = await imageCache.getCachedUrl(cover)
+    } catch {
+      cachedCoverUrl.value = cover
+    }
+  },
+  { immediate: true }
+)
+
+// 歌词解读相关
+const isInterpreting = ref(false)
+const interpretationResult = ref<InterpretationResult | null>(null)
+const showInterpretation = ref(false)
+
+
 // 处理浏览器返回按钮
-function handlePopState(e: PopStateEvent) {
+function handlePopState() {
+  // 优先处理 AI 解读弹窗
+  if (showInterpretation.value) {
+    showInterpretation.value = false
+    return
+  }
+  
+  // 其次处理歌词面板
   if (store.showLyrics) {
-    e.preventDefault()
     store.toggleLyrics()
-    window.history.pushState({ lyricsOpen: false }, '')
   }
 }
 
+// 监听歌词面板打开状态，推入历史记录用于返回键拦截
 watch(() => store.showLyrics, (isOpen) => {
   if (isOpen) {
-    window.history.pushState({ lyricsOpen: true }, '')
+    window.history.pushState({ type: 'lyrics' }, '')
+  }
+})
+
+// 监听 AI 解读弹窗状态，推入历史记录用于返回键拦截
+watch(showInterpretation, (isOpen) => {
+  if (isOpen) {
+    window.history.pushState({ type: 'interpretation' }, '')
   }
 })
 
@@ -62,11 +102,6 @@ const lyricsDisplayMode = ref<'original' | 'translated' | 'bilingual'>('original
 // 翻译 API 配置
 const translateConfig = ref(loadTranslateConfig())
 
-// 歌词解读相关
-const isInterpreting = ref(false)
-const interpretationResult = ref<InterpretationResult | null>(null)
-const showInterpretation = ref(false)
-
 async function handleInterpretLyrics() {
   if (!store.currentTrack?.title || !store.currentTrack?.artist || !store.currentTrack?.lrc) return
   
@@ -89,6 +124,57 @@ async function handleInterpretLyrics() {
     isInterpreting.value = false
   }
 }
+
+// 语音朗读解读相关
+const isSpeakingInterpretation = ref(false)
+const interpretationAudio = ref<HTMLAudioElement | null>(null)
+
+async function toggleSpeakInterpretation() {
+  if (isSpeakingInterpretation.value) {
+    if (interpretationAudio.value) {
+      interpretationAudio.value.pause()
+    }
+    isSpeakingInterpretation.value = false
+    return
+  }
+
+  if (!interpretationResult.value) return
+
+  isSpeakingInterpretation.value = true
+  try {
+    // 朗读内容：主题 + 总结
+    const textToRead = `${interpretationResult.value.theme}。${interpretationResult.value.summary}`
+    const buffer = await ttsManager.getVoice(textToRead)
+    const blob = new Blob([buffer], { type: 'audio/mpeg' })
+    const url = URL.createObjectURL(blob)
+
+    if (interpretationAudio.value) {
+      interpretationAudio.value.pause()
+      URL.revokeObjectURL(interpretationAudio.value.src)
+    }
+
+    const audio = new Audio(url)
+    interpretationAudio.value = audio
+    audio.onended = () => {
+      isSpeakingInterpretation.value = false
+    }
+    await audio.play()
+  } catch (error: any) {
+    console.error('Speech synthesis failed:', error)
+    isSpeakingInterpretation.value = false
+    alert('语音播放失败')
+  }
+}
+
+// 监听弹窗关闭，停止朗读
+watch(showInterpretation, (val) => {
+  if (!val && isSpeakingInterpretation.value) {
+    if (interpretationAudio.value) {
+      interpretationAudio.value.pause()
+    }
+    isSpeakingInterpretation.value = false
+  }
+})
 
 // 歌词设置
 interface LyricsSettings {
@@ -584,9 +670,9 @@ watch(
       <!-- 动态模糊背景 -->
       <div class="absolute inset-0 z-0">
         <div 
-          v-if="store.currentTrack?.cover"
+          v-if="cachedCoverUrl"
           class="absolute inset-0 bg-cover bg-center transition-all duration-1000"
-          :style="{ backgroundImage: `url(${store.currentTrack.cover})` }"
+          :style="{ backgroundImage: `url(${cachedCoverUrl})` }"
         ></div>
         <div class="absolute inset-0 bg-black/70 backdrop-blur-3xl"></div>
       </div>
@@ -615,10 +701,11 @@ watch(
       <!-- 歌曲信息头部 -->
       <div class="flex items-center px-6 py-2 gap-4 flex-shrink-0 relative z-10 box-border w-full">
          <div class="w-16 h-16 rounded-xl overflow-hidden bg-white/10 shadow-lg flex-shrink-0 relative">
-            <img 
+            <CachedImage 
               v-if="store.currentTrack?.cover" 
               :src="store.currentTrack.cover" 
-              class="w-full h-full object-cover"
+              :alt="store.currentTrack?.title"
+              class="w-full h-full"
             />
             <div v-else class="w-full h-full flex items-center justify-center bg-white/5 text-white/20">
               <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
@@ -854,7 +941,7 @@ watch(
   <Transition name="fade">
     <div 
       v-if="showInterpretation && interpretationResult" 
-      class="fixed inset-0 z-[220] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+      class="fixed inset-0 z-[220] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm transform translate-z-0 backface-visibility-hidden"
       @click="showInterpretation = false"
     >
       <div 
@@ -874,11 +961,28 @@ watch(
               <p class="text-white/40 text-[10px] uppercase tracking-wider">Lyrical Analysis</p>
             </div>
           </div>
-          <button @click="showInterpretation = false" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </button>
+          <div class="flex items-center gap-2">
+            <!-- 语音朗读按钮 (暂时隐藏) -->
+            <button 
+              v-if="false"
+              @click="toggleSpeakInterpretation" 
+              class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all mr-1"
+              :class="{ 'text-purple-400 bg-purple-500/10': isSpeakingInterpretation }"
+              :title="isSpeakingInterpretation ? '停止朗读' : '朗读解读'"
+            >
+              <svg v-if="isSpeakingInterpretation" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+              </svg>
+              <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
+              </svg>
+            </button>
+            <button @click="showInterpretation = false" class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <!-- 内容渲染 -->

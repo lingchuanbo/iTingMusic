@@ -786,6 +786,13 @@ class TuneHubProvider implements ApiProvider {
         return raw
     }
 
+    // 清除指定歌曲的 parse 缓存（用于播放错误重试前刷新 URL）
+    public invalidateParseCache(platform: MusicPlatform, id: string): void {
+        const cacheKey = `${platform}-${id}`
+        this.parseCache.delete(cacheKey)
+        console.log('[TuneHub] 已清除 parse 缓存:', cacheKey)
+    }
+
     // 公开 executeMethod 供外部调用
     public executeMethodPublic(
         platform: MusicPlatform,
@@ -806,6 +813,11 @@ export async function executeTuneHubMethod(
     variables: Record<string, string | number> = {}
 ): Promise<any[]> {
     return tuneHubInstance.executeMethodPublic(platform, method, variables)
+}
+
+// 清除指定歌曲的 parse 缓存
+export function invalidateParseCache(platform: MusicPlatform, id: string): void {
+    tuneHubInstance.invalidateParseCache(platform, id)
 }
 
 // ========== GD Studio Provider ==========

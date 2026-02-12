@@ -263,42 +263,130 @@ class NativeAudioPlayer {
             this.listeners.push(trackListener)
             console.log('NativeAudioPlayer: onTrackChange 注册成功')
 
-            // 5. 错误监听 - 智能重试机制
+            // 5. 错误监听 - 智能重试机制（带缓存清除 + 跨平台搜索回退 + 超时）
             console.log('NativeAudioPlayer: 正在注册 onError...')
+            const recentlyFailedIds = new Set<string>() // 最近失败的歌曲 ID，防止循环
             const errorListener = await NativeExoPlayer.addListener('onError', async (data) => {
                 console.error('NativeAudioPlayer: [EVENT] 播放错误', data.code, data.message)
                 logger.error(`[onError] 播放错误: ${data.code} - ${data.message}`)
                 const store = usePlayerStore()
                 store.isPlaying = false
 
-                // 智能重试：尝试刷新 URL 并重新播放
                 const currentTrack = store.playlist[store.currentIndex] as any
-                if (currentTrack && currentTrack._platform && currentTrack._songId) {
-                    logger.info(`[onError] 尝试刷新 URL 并重试: ${currentTrack.title}`)
-                    try {
-                        const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
-                        const newUrl = await getActualMusicUrl(currentTrack._platform, currentTrack._songId)
-
-                        if (newUrl) {
-                            logger.info(`[onError] 获取到新 URL，重试播放`)
-                            await NativeExoPlayer.play({
-                                url: newUrl,
-                                id: currentTrack.id,
-                                title: currentTrack.title,
-                                artist: currentTrack.artist,
-                                cover: currentTrack.cover
-                            })
-                            store.isPlaying = true
-                            logger.info(`[onError] 重试成功`)
-                            return // 重试成功，不跳下一首
-                        }
-                    } catch (retryError) {
-                        logger.error(`[onError] 重试失败: ${retryError}`)
-                    }
+                if (!currentTrack) {
+                    logger.info(`[onError] 无当前曲目，跳到下一首`)
+                    setTimeout(() => store.nextTrack(), 1000)
+                    return
                 }
 
-                // 重试失败或非在线歌曲，跳到下一首
-                logger.info(`[onError] 跳到下一首`)
+                // 如果这首歌最近已经失败过，直接跳过不再重试
+                if (recentlyFailedIds.has(currentTrack.id)) {
+                    logger.info(`[onError] ${currentTrack.title} 近期已失败过，直接跳过`)
+                    setTimeout(() => store.nextTrack(), 500)
+                    return
+                }
+
+                // 带超时的重试逻辑
+                const retryWithTimeout = async (): Promise<boolean> => {
+                    return new Promise<boolean>((resolve) => {
+                        const timeout = setTimeout(() => {
+                            logger.error(`[onError] 重试超时 (15s)`)
+                            resolve(false)
+                        }, 15000)
+
+                            ; (async () => {
+                                try {
+                                    // 策略1: 刷新同平台 URL（先清缓存）
+                                    if (currentTrack._platform && currentTrack._songId) {
+                                        logger.info(`[onError] 尝试刷新 URL 并重试: ${currentTrack.title}`)
+                                        const { getActualMusicUrl } = await import('@/services/source/OnlineApiSource')
+                                        const { invalidateParseCache } = await import('@/services/source/ApiProviders')
+
+                                        // 清除可能过期的缓存
+                                        invalidateParseCache(currentTrack._platform, currentTrack._songId)
+
+                                        const newUrl = await getActualMusicUrl(currentTrack._platform, currentTrack._songId)
+                                        if (newUrl) {
+                                            logger.info(`[onError] 获取到新 URL，重试播放`)
+                                            await NativeExoPlayer.play({
+                                                url: newUrl,
+                                                id: currentTrack.id,
+                                                title: currentTrack.title,
+                                                artist: currentTrack.artist,
+                                                cover: currentTrack.cover
+                                            })
+                                            store.isPlaying = true
+                                            store.saveCachedAudioUrl(currentTrack.id, newUrl)
+                                            logger.info(`[onError] 重试成功`)
+                                            clearTimeout(timeout)
+                                            resolve(true)
+                                            return
+                                        }
+                                    }
+
+                                    // 策略2: 跨平台搜索匹配
+                                    if (currentTrack.title && currentTrack.artist) {
+                                        logger.info(`[onError] URL 刷新失败，尝试跨平台搜索: ${currentTrack.title} - ${currentTrack.artist}`)
+                                        const { searchAndMatch } = await import('@/utils/songMatcher')
+                                        const { searchResultToTrackAsync } = await import('@/services/source/OnlineApiSource')
+                                        const { getActiveProvider } = await import('@/services/source/ApiProviders')
+
+                                        const provider = getActiveProvider()
+                                        const sources = provider.supportedPlatforms.slice(0, 3) as any[]
+                                        const match = await searchAndMatch(currentTrack.title, currentTrack.artist, sources)
+
+                                        if (match) {
+                                            logger.info(`[onError] 跨平台匹配成功: ${match.name} - ${match.artist} (${match.platform})`)
+                                            const newTrack = await searchResultToTrackAsync(match)
+                                            // 更新 track 信息
+                                            currentTrack._platform = match.platform
+                                            currentTrack._songId = match.id
+                                            currentTrack.url = newTrack.url
+
+                                            const { getActualMusicUrl: getUrl } = await import('@/services/source/OnlineApiSource')
+                                            const finalUrl = await getUrl(match.platform as any, match.id)
+                                            if (finalUrl) {
+                                                await NativeExoPlayer.play({
+                                                    url: finalUrl,
+                                                    id: currentTrack.id,
+                                                    title: currentTrack.title,
+                                                    artist: currentTrack.artist,
+                                                    cover: newTrack.cover || currentTrack.cover
+                                                })
+                                                store.isPlaying = true
+                                                store.saveCachedAudioUrl(currentTrack.id, finalUrl)
+                                                logger.info(`[onError] 跨平台重试成功`)
+                                                clearTimeout(timeout)
+                                                resolve(true)
+                                                return
+                                            }
+                                        }
+                                    }
+
+                                    clearTimeout(timeout)
+                                    resolve(false)
+                                } catch (retryError) {
+                                    logger.error(`[onError] 重试失败: ${retryError}`)
+                                    clearTimeout(timeout)
+                                    resolve(false)
+                                }
+                            })()
+                    })
+                }
+
+                const retrySuccess = await retryWithTimeout()
+                if (retrySuccess) {
+                    // 重试成功，从失败列表移除（如果之前加过的话）
+                    recentlyFailedIds.delete(currentTrack.id)
+                    return
+                }
+
+                // 标记为失败，防止循环播放同一首
+                recentlyFailedIds.add(currentTrack.id)
+                // 5 分钟后自动清除失败标记，允许后续重试
+                setTimeout(() => recentlyFailedIds.delete(currentTrack.id), 5 * 60 * 1000)
+
+                logger.info(`[onError] 所有重试均失败，跳到下一首`)
                 setTimeout(() => store.nextTrack(), 1000)
             })
             this.listeners.push(errorListener)

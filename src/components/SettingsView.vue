@@ -681,6 +681,42 @@ function toggleSection(section: string) {
             />
           </template>
 
+          <div class="pt-4 border-t border-white/10 space-y-3">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-fuchsia-400">✨</span>
+                <span class="text-white text-sm">Exa 联网搜索</span>
+              </div>
+              <button
+                @click="aiConfig.exaEnabled = !aiConfig.exaEnabled; saveAI()"
+                :class="[
+                  'relative w-10 h-5 rounded-full transition-colors',
+                  aiConfig.exaEnabled ? 'bg-fuchsia-500' : 'bg-white/10'
+                ]"
+              >
+                <span
+                  :class="[
+                    'absolute top-1 w-3 h-3 rounded-full bg-white transition-transform',
+                    aiConfig.exaEnabled ? 'left-6' : 'left-1'
+                  ]"
+                ></span>
+              </button>
+            </div>
+            
+            <div v-if="aiConfig.exaEnabled" class="space-y-2">
+              <div class="relative">
+                <input
+                  v-model="aiConfig.exaApiKey"
+                  type="password"
+                  placeholder="Exa API Key"
+                  class="w-full h-9 px-3 rounded-lg bg-white/10 text-white text-xs placeholder-white/30 outline-none focus:ring-1 focus:ring-fuchsia-500"
+                  @change="saveAI"
+                />
+              </div>
+              <p class="text-white/30 text-[10px]">开启后 AI 搜索将具备实时互联网检索能力</p>
+            </div>
+          </div>
+
           <!-- 测试 -->
           <div class="flex items-center gap-2">
             <button

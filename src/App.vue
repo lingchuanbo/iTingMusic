@@ -1,27 +1,33 @@
 <script setup lang="ts">
-import { ref, computed, watch, provide, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, provide, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import { usePlayerStore } from '@/store/player'
 import { audioPlayer } from '@/services/player/AudioPlayer'
 import { Capacitor } from '@capacitor/core'
 import { nativeAudioPlayer } from '@/services/player/NativeAudioPlayer'
 import { behaviorService } from '@/services/BehaviorService'
 import { trackStorage } from '@/services/TrackStorage'
+import { imageCache } from '@/services/ImageCache'
+import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer, isModalOpen, isRandomListenOpen } from '@/store/ui'
+
+// 常驻组件（同步导入）
 import Sidebar from '@/components/Sidebar.vue'
 import SearchBar from '@/components/SearchBar.vue'
-import SongList from '@/components/SongList.vue'
 import PlayerBar from '@/components/PlayerBar.vue'
 import LyricsPanel from '@/components/LyricsPanel.vue'
-import ToplistView from '@/components/ToplistView.vue'
-import AIPickerView from '@/components/AIPickerView.vue'
-import PlaylistView from '@/components/PlaylistView.vue'
-import FavoriteView from '@/components/FavoriteView.vue'
-import WebDAVView from '@/components/WebDAVView.vue'
-import LocalView from '@/components/LocalView.vue'
-import OfflineView from '@/components/OfflineView.vue'
-import SettingsView from '@/components/SettingsView.vue'
 import MobileNav from '@/components/MobileNav.vue'
-import RecommendView from '@/components/RecommendView.vue'
 import HomeView from '@/components/HomeView.vue'
+
+// 按需加载的页面组件
+const SongList = defineAsyncComponent(() => import('@/components/SongList.vue'))
+const ToplistView = defineAsyncComponent(() => import('@/components/ToplistView.vue'))
+const AIPickerView = defineAsyncComponent(() => import('@/components/AIPickerView.vue'))
+const PlaylistView = defineAsyncComponent(() => import('@/components/PlaylistView.vue'))
+const FavoriteView = defineAsyncComponent(() => import('@/components/FavoriteView.vue'))
+const RecommendView = defineAsyncComponent(() => import('@/components/RecommendView.vue'))
+const WebDAVView = defineAsyncComponent(() => import('@/components/WebDAVView.vue'))
+const LocalView = defineAsyncComponent(() => import('@/components/LocalView.vue'))
+const OfflineView = defineAsyncComponent(() => import('@/components/OfflineView.vue'))
+const SettingsView = defineAsyncComponent(() => import('@/components/SettingsView.vue'))
 
 const store = usePlayerStore()
 const activeView = ref('home')
@@ -29,7 +35,6 @@ const searchBarRef = ref<InstanceType<typeof SearchBar> | null>(null)
 
 // 处理原生返回键
 let backButtonListener: any = null
-import { isPlayerExpanded as playerExpanded, closePlayerPopups, collapsePlayer, isModalOpen, isRandomListenOpen } from '@/store/ui'
 
 
 onMounted(async () => {
@@ -114,12 +119,28 @@ const showPlayerBar = computed(() => !isSearchOpen.value && !aiPickerFullscreen.
 // 是否显示底部导航（搜索弹窗打开时隐藏，AI全屏时隐藏，播放器展开时隐藏，随便听听时隐藏）
 const showMobileNav = computed(() => !isSearchOpen.value && !aiPickerFullscreen.value && !playerExpanded.value && !isRandomListenOpen.value)
 
-// 动态背景
+// 动态背景 - 使用 imageCache 解析封面 URL（解决 Android 原生平台 CORS 问题）
+const cachedBgCoverUrl = ref('')
+watch(
+  () => store.currentTrack?.cover,
+  async (cover) => {
+    if (!cover) {
+      cachedBgCoverUrl.value = ''
+      return
+    }
+    try {
+      cachedBgCoverUrl.value = await imageCache.getCachedUrl(cover)
+    } catch {
+      cachedBgCoverUrl.value = cover
+    }
+  },
+  { immediate: true }
+)
+
 const bgStyle = computed(() => {
-  const cover = store.currentTrack?.cover
-  if (!cover) return {}
+  if (!cachedBgCoverUrl.value) return {}
   return {
-    backgroundImage: `url(${cover})`,
+    backgroundImage: `url(${cachedBgCoverUrl.value})`,
     backgroundSize: 'cover',
     backgroundPosition: 'center'
   }
